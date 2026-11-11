@@ -1,0 +1,5 @@
+title = "workstation-bootstrap secret rules"
+
+# Extend the maintained default rule set; local additions go below.
+[extend]
+useDefault = true
