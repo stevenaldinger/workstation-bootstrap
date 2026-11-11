@@ -1,0 +1,40 @@
+name: Check
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Run Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # gitleaks scans the full history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up mise and the pinned tools
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b  # v5.2.7
+        with:
+          version: 2026.11.6
+
+      - name: Lint shell scripts
+        run: scripts/check.sh shellcheck
+
+      - name: Run tests
+        if: ${{ !cancelled() }}
+        run: scripts/check.sh tests
+
+      - name: Scan history for secrets
+        if: ${{ !cancelled() }}
+        run: scripts/check.sh secrets
