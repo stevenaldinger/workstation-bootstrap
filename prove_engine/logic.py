@@ -74,8 +74,11 @@ def parse_share(spec: str) -> Share:
     if not sep or not rest or not SHARE_NAME_RE.fullmatch(name):
         raise ProofError(f"share must look like NAME=PATH[:ro]: {spec!r}")
     read_only = rest.endswith(":ro")
-    path = Path(rest[:-3] if read_only else rest).expanduser()
-    return Share(name, path, read_only)
+    location = rest[:-3] if read_only else rest
+    # Tart reads `--dir NAME:PATH[:ro]`, so a colon inside the path would split it wrongly.
+    if not location or ":" in location:
+        raise ProofError(f"share must look like NAME=PATH[:ro] with no ':' in PATH: {spec!r}")
+    return Share(name, Path(location).expanduser(), read_only)
 
 
 VNC_ADDRESS_RE = re.compile(r"vnc://:(?P<password>[^@\s]+)@(?P<host>[^:\s]+):(?P<port>\d+)")

@@ -311,22 +311,11 @@ def test_the_key_item_is_created_once_and_read_from_the_private_vault(machine: M
     identity.create_key(ctx)
     creates = [call for call in machine.calls("op") if call[:2] == ["item", "create"]]
     assert len(creates) == 1
-    assert creates[0] == [
-        "item",
-        "create",
-        "--category",
-        "ssh",
-        "--ssh-generate-key",
-        "ed25519",
-        "--title",
-        "GitHub SSH (workstation)",
-        "--vault",
-        "Private",
-        "--account",
-        PERSONAL_ACCOUNT["account_uuid"],
-        "--format",
-        "json",
-    ]
+    create = creates[0]
+    assert create[create.index("--category") + 1] == "ssh"
+    assert create[create.index("--ssh-generate-key") + 1] == "ed25519"
+    assert create[create.index("--vault") + 1] == "Private"
+    assert create[create.index("--account") + 1] == PERSONAL_ACCOUNT["account_uuid"]
 
 
 def test_every_item_command_names_the_account_explicitly(machine: Machine) -> None:

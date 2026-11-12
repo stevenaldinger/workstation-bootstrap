@@ -143,7 +143,21 @@ def test_parse_share(spec: str, name: str, path: Path, read_only: bool) -> None:
 
 
 @pytest.mark.parametrize(
-    "spec", ["", "repo", "=/x", "repo=", "bad name=/x", "../x=/x", "r:epo=/x", "repo\n=/x"]
+    "spec",
+    [
+        "",
+        "repo",
+        "=/x",
+        "repo=",
+        "bad name=/x",
+        "../x=/x",
+        "r:epo=/x",
+        "repo\n=/x",
+        "repo=/a:b",
+        "repo=/a:b:ro",
+        "repo=:ro",
+        "repo=/x:ro:ro",
+    ],
 )
 def test_parse_share_rejects_malformed_specs(spec: str) -> None:
     with pytest.raises(ProofError, match="share must look like"):
