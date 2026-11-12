@@ -53,10 +53,20 @@ class Sandbox:
         subprocess.run([*git, "commit", "-q", "-m", "chore(test): seed"], check=True)
 
     def run(
-        self, *args: str, fail: str = "", system: str = "Linux"
+        self, *args: str, fail: str = "", system: str = "Linux", hide_pwsh: bool = False
     ) -> subprocess.CompletedProcess[str]:
+        system_path = ["/usr/bin", "/bin"]
+        if hide_pwsh:
+            # A runner may ship a real pwsh in /usr/bin, so offer only what check.sh needs.
+            hidden = self.root / "system"
+            hidden.mkdir(exist_ok=True)
+            for name in ("bash", "basename", "cat", "dirname"):
+                link = hidden / name
+                if not link.exists():
+                    link.symlink_to(shutil.which(name) or name)
+            system_path = [str(hidden)]
         env = {
-            "PATH": os.pathsep.join([str(self.root / "bin"), "/usr/bin", "/bin"]),
+            "PATH": os.pathsep.join([str(self.root / "bin"), *system_path]),
             "FAKE_LOG": str(self.log),
             "FAKE_FAIL": fail,
             "FAKE_UNAME": system,
@@ -176,7 +186,7 @@ def test_powershell_lints_start_ps1_with_the_local_pwsh(sandbox: Sandbox) -> Non
 
 def test_powershell_uses_the_pinned_container_image_when_pwsh_is_missing(sandbox: Sandbox) -> None:
     (sandbox.root / "bin" / "pwsh").unlink()
-    result = sandbox.run("powershell")
+    result = sandbox.run("powershell", hide_pwsh=True)
     assert result.returncode == 0, result.stderr
     call = sandbox.commands()
     assert call.startswith("docker run --rm --platform linux/amd64 -v ")
