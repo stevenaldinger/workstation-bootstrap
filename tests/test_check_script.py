@@ -90,6 +90,7 @@ def test_all_passes_when_every_check_passes(sandbox: Sandbox) -> None:
         ("pytest -q", "tests"),
         ("gitleaks", "secrets"),
         ("check_commits", "commits"),
+        ("check_agent_files", "agent-files"),
         ("shellcheck,gitleaks", "shellcheck secrets"),
         ("ruff format,pytest -q", "python tests"),
     ],

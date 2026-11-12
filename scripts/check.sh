@@ -14,6 +14,7 @@ set -euo pipefail
 #   scripts/check.sh tests         # Run the pytest suite through uv
 #   scripts/check.sh secrets       # Scan the full Git history with gitleaks
 #   scripts/check.sh commits       # Validate commit messages (CHECK_BASE_SHA bounds the range)
+#   scripts/check.sh agent-files   # Validate the agent instruction files
 #   scripts/check.sh -h            # Show help
 #
 # What it does:
@@ -31,13 +32,13 @@ set -euo pipefail
 PYTEST_VERSION="9.2.0"
 RUFF_VERSION="0.17.4"
 MYPY_VERSION="2.4.1"
-ALL_CHECKS=(shellcheck python tests secrets commits)
+ALL_CHECKS=(shellcheck python tests secrets commits agent-files)
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 show_help() {
   cat <<EOF
-Usage: $(basename "$0") [shellcheck|python|tests|secrets|commits|all]
+Usage: $(basename "$0") [shellcheck|python|tests|secrets|commits|agent-files|all]
 
 Runs the repository checks. With no argument, runs every check and reports each failure.
 
@@ -89,6 +90,10 @@ run_commits() {
   (cd "${REPO_ROOT}" && uv run --no-project scripts/check_commits.py ${args[@]+"${args[@]}"})
 }
 
+run_agent_files() {
+  (cd "${REPO_ROOT}" && uv run --no-project scripts/check_agent_files.py)
+}
+
 run_named() {
   case "$1" in
     shellcheck) run_shellcheck ;;
@@ -96,6 +101,7 @@ run_named() {
     tests) run_tests ;;
     secrets) run_secrets ;;
     commits) run_commits ;;
+    agent-files) run_agent_files ;;
     *) return 2 ;;
   esac
 }
@@ -125,11 +131,11 @@ main() {
     all)
       run_all
       ;;
-    shellcheck | python | tests | secrets | commits)
+    shellcheck | python | tests | secrets | commits | agent-files)
       run_named "${target}"
       ;;
     *)
-      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|commits|all]" >&2
+      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|commits|agent-files|all]" >&2
       return 2
       ;;
   esac
