@@ -29,6 +29,7 @@ from prove_engine import (
 )
 from prove_engine.disk import disk_is_grown, grow_layout
 from prove_engine.model import Base, RunResult
+from prove_engine.toolchain import download
 
 
 def test_ensure_tart_rejects_a_tampered_archive_before_unpacking(
@@ -441,6 +442,18 @@ def test_two_runs_of_one_scenario_in_one_second_get_different_clone_names(
             names.append(vm.name)
     assert names[0] != names[1]
     assert all(name.startswith("wsrun-first-run-20260101000000-") for name in names)
+
+
+@pytest.mark.parametrize(
+    "url", ["http://example.test/tart.tar.gz", "file:///etc/hosts", "ftp://x/y"]
+)
+def test_a_download_from_a_non_https_address_is_refused_before_any_request(
+    tmp_path: Path, url: str
+) -> None:
+    destination = tmp_path / "tart.tar.gz"
+    with pytest.raises(ProofError, match="non-https"):
+        download(url, destination)
+    assert not destination.exists()
 
 
 def test_a_corrupt_cached_tart_archive_is_downloaded_once_more(

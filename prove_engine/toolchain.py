@@ -13,10 +13,13 @@ from prove_engine.model import ProofError
 
 
 def download(url: str, destination: Path) -> None:
+    if not url.startswith("https://"):
+        raise ProofError(f"refusing to download from a non-https address: {url}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=destination.parent, suffix=".part")
     try:
-        with os.fdopen(fd, "wb") as handle, urllib.request.urlopen(url, timeout=120) as response:
+        # The scheme was checked above, so this opens only an https address.
+        with os.fdopen(fd, "wb") as handle, urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310
             shutil.copyfileobj(response, handle)
         os.replace(tmp_name, destination)
     except OSError as exc:
