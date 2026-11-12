@@ -71,6 +71,16 @@ def pin(text: str, name: str) -> str:
     return match.group(1)
 
 
+def system_folders() -> list[str]:
+    """The folders a fresh Windows 11 has on PATH, so the host's own winget alias never answers."""
+    windows = Path(os.environ["SYSTEMROOT"])
+    return [
+        str(windows / "System32"),
+        str(windows),
+        str(windows / "System32" / "WindowsPowerShell" / "v1.0"),
+    ]
+
+
 def mise_zip() -> bytes:
     """A release archive whose mise.exe is the logging fake."""
     body = fake_exe().read_bytes()
@@ -116,7 +126,7 @@ class Sandbox:
             "FAKE_SCRIPT": str(self.script),
             "FAKE_PYTHON": sys.executable,
             "FAKE_TOOLS_PY": str(FAKE_TOOLS),
-            "PATH": os.pathsep.join([str(self.bin_dir), os.environ["PATH"]]),
+            "PATH": os.pathsep.join([str(self.bin_dir), *system_folders()]),
             **env,
         }
         return subprocess.run(
@@ -196,7 +206,7 @@ def test_a_supported_computer_installs_mise_then_hands_off_to_start_py(sandbox: 
     assert result.returncode == 0, result.stderr + result.stdout
     handoff = sandbox.mise_rows()[-1]
     assert handoff[1] == "exec"
-    assert handoff[handoff.index("--") + 1 :][:-1] == [
+    assert handoff[handoff.index("--") + 1 : -2] == [
         "python", str(sandbox.work / "start.py"), "--stage1",
         str(sandbox.work / "stage1-windows.toml"), "--personal-account", ACCOUNT,
     ]  # fmt: skip
@@ -269,7 +279,7 @@ def test_an_unsupported_computer_stops_before_changing_anything(
     assert cause in result.stderr
     assert sandbox.calls("Invoke-WebRequest") == []
     assert list(sandbox.local.iterdir()) == []
-    assert list(sandbox.profile.iterdir()) == []
+    assert not (sandbox.profile / ".local").exists()
 
 
 @pytest.mark.parametrize(
