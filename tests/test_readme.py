@@ -119,6 +119,26 @@ def test_the_documented_command_downloads_into_a_fresh_private_folder_each_time(
     assert "/tmp/" not in bootstrap_command()
 
 
+def windows_command() -> str:
+    section = README.split("## Bootstrap command", 1)[1].split("\n## ", 1)[0]
+    match = re.search(r"```powershell\n(.*?)```", section, flags=re.S)
+    assert match, "the README has no Windows bootstrap command block"
+    return match.group(1)
+
+
+def test_the_documented_windows_command_checks_the_hash_before_it_runs_anything() -> None:
+    command = windows_command()
+    assert command.index("Get-FileHash") < command.index("-File $file")
+    assert "-ne '<sha256>'" in command
+    assert "throw" in command
+    assert "$ErrorActionPreference = 'Stop'" in command
+    assert "<commit>/start.ps1" in command
+    assert command.count("https://") == 1 and "http://" not in command
+    assert "Tls12" in command
+    assert "$env:TEMP" in command
+    assert "[guid]::NewGuid()" in command
+
+
 def test_the_documented_download_refuses_plain_http_and_old_tls() -> None:
     command = bootstrap_command()
     assert "--proto '=https'" in command

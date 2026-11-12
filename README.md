@@ -2,13 +2,15 @@
 
 ## What this is
 
-`stevenaldinger/workstation-bootstrap` is the public starter for a private workstation setup repository. A new Mac has no GitHub credential, so it cannot clone the private repository directly. The starter runs first, sets up the machine's identity, and then clones the private repository and hands off to it.
+`stevenaldinger/workstation-bootstrap` is the public starter for a private workstation setup repository. A new Mac or Windows computer has no GitHub credential, so it cannot clone the private repository directly. The starter runs first, sets up the machine's identity, and then clones the private repository and hands off to it.
 
-The starter holds no account identifiers or email addresses. The one personal value it needs, the 1Password sign-in address, is passed as a command argument. It does carry a short package list for its own stage (`stage1.toml`: the 1Password app, its command line, and Git) and the settings for the identity and the clone (`start.toml`: the key's item title and vault, the private repository's address, its checkout folder, and its hook folder).
+The starter holds no account identifiers or email addresses. The one personal value it needs, the 1Password sign-in address, is passed as a command argument. It does carry a short package list for its own stage (`stage1.toml` on a Mac and `stage1-windows.toml` on Windows: the 1Password app, its command line, and Git) and the settings for the identity and the clone (`start.toml`: the key's item title and vault, the private repository's address, its checkout folder, and its hook folder).
 
 The repository also holds the proof engine and the checks for both.
 
 ## Bootstrap command
+
+### Mac
 
 A Mac runs the starter with one command. It downloads `start.sh` at one commit into a private temporary folder, checks the file's SHA-256, and runs it only when the hash matches:
 
@@ -21,29 +23,53 @@ dir="$(mktemp -d)" \
 
 `mktemp -d` makes a folder only the current user can enter, so no other process can swap the file between the check and the run. `scripts/pins.sh show` prints the `<commit>` and `<sha256>` of a released `start.sh`; take them from the source that sent you here, not from a file you downloaded alongside the script. `--personal-account` is the one personal value the starter needs: the email or sign-in address of the personal 1Password account. `/bin/bash "$dir/start.sh" -h` prints the usage. Any other argument goes to the private repository's `ws bootstrap`.
 
+### Windows
+
+A Windows 11 computer (x64, 23H2 or later, with virtualization turned on) runs the starter from Windows PowerShell 5.1, which every Windows 11 has. Paste the block into a PowerShell window that is not elevated. It downloads `start.ps1` at one commit into a new folder under the user's own `%TEMP%`, checks the file's SHA-256, and runs it only when the hash matches:
+
+```powershell
+& {
+  $ErrorActionPreference = 'Stop'
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $dir = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ([guid]::NewGuid()))
+  $file = Join-Path $dir 'start.ps1'
+  Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/stevenaldinger/workstation-bootstrap/<commit>/start.ps1' -OutFile $file
+  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash -ne '<sha256>') { throw 'start.ps1 does not match its SHA-256; nothing was run' }
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $file -PersonalAccount <email or sign-in address>
+}
+```
+
+The new folder inherits the access list of `%TEMP%`, which only the user, administrators, and the system can enter, so no other user can swap the file between the check and the run. `-ExecutionPolicy Bypass` applies to that one run, because a Windows 11 client refuses to run any script file under its default policy. `scripts/pins.sh show` prints the `<commit>` and `<sha256>` of a released `start.ps1`; take them from the source that sent you here. `-PersonalAccount` comes first and takes the email or sign-in address of the personal 1Password account. Any other argument goes to the private repository's `ws bootstrap`.
+
+The first run can end in a restart: Windows Subsystem for Linux must be turned on before Ubuntu can be installed. The starter asks first. If you choose to restart, it registers `start.ps1` with the same `-PersonalAccount` to run again when you sign in, and running the command again by hand does the same.
+
 ## Trust boundary
 
-The command pins the bytes of `start.sh`. From there, each download is either checked by this repository or handed to a tool that does its own checking.
+The command pins the bytes of `start.sh` or `start.ps1`. From there, each download is either checked by this repository or handed to a tool that does its own checking.
 
 Pinned and checked here:
 
-- `start.sh`, by the SHA-256 in the command above.
-- The mise archive, by `MISE_SHA256` in `start.sh`.
-- `start.sha256`, by `MANIFEST_SHA256` in `start.sh`, and through it every starter file (`start.py`, its sibling modules, `start.toml`, `stage1.toml`, and `github_known_hosts`), each downloaded at `FILES_COMMIT` and checked against the manifest.
+- `start.sh` and `start.ps1`, by the SHA-256 in the command above.
+- The mise archive, by `MISE_SHA256` in `start.sh` and `$MiseSha256` in `start.ps1`. Each is the platform's line in the release's `SHASUMS256.txt`.
+- `start.sha256`, by `MANIFEST_SHA256` in `start.sh` and `$ManifestSha256` in `start.ps1`, and through it every starter file (`start.py`, its sibling modules, `start.toml`, `stage1.toml`, `stage1-windows.toml`, and `github_known_hosts`), each downloaded at `FILES_COMMIT` and checked against the manifest.
 - GitHub's SSH host keys. `github_known_hosts` holds the three keys GitHub publishes in the `ssh_keys` field of [its meta API](https://api.github.com/meta), which match [GitHub's published fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints). ssh runs with `StrictHostKeyChecking=yes` and only that file, so a different key stops the handshake and the clone.
 
 Pinned by version here, downloaded and verified by mise:
 
-- Python, uv, and the GitHub CLI. `start.sh` names the exact versions; mise downloads them and applies whatever verification its backend provides for each tool, such as a checksum, an attestation, or a signature. This repository does not check those bytes again.
+- Python, uv, and the GitHub CLI. `start.sh` and `start.ps1` name the exact versions; mise downloads them and applies whatever verification its backend provides for each tool, such as a checksum, an attestation, or a signature. This repository does not check those bytes again.
 
 Delegated, not pinned:
 
-- The 1Password app, the 1Password command line, and Git, listed in `stage1.toml` at `latest`. mise installs them as a Homebrew cask and formulae. It checks a formula's download against Homebrew's published sha256 and a cask's when the cask provides one, and the versions are whatever Homebrew serves that day.
+- On a Mac, the 1Password app, the 1Password command line, and Git, listed in `stage1.toml` at `latest`. mise installs them as a Homebrew cask and formulae. It checks a formula's download against Homebrew's published sha256 and a cask's when the cask provides one, and the versions are whatever Homebrew serves that day.
+- On Windows, the same three, listed in `stage1-windows.toml` with exact winget versions. mise runs `winget install --exact --version`, and winget checks each installer against the SHA-256 in its package manifest. The installers ask Windows for administrator approval, because they install for every user.
+- On Windows, the winget client itself, only on a computer that lacks it (a Windows 11 Pro computer ships winget, so a normal client never takes this path). `start.ps1` first registers the App Installer that Windows already holds, and otherwise installs the `Microsoft.WinGet.Client` module from the PowerShell Gallery at a pinned version and lets it repair winget. That is pinned by version, with the signature checked by Windows.
 - The private repository's contents, which the owner trusts by cloning it over the pinned host key into `~/.config/mise`.
 
 Homebrew is not required. mise's `brew:` and `brew-cask:` entries in `stage1.toml` install into the standard Homebrew prefix without Homebrew present, according to [the mise documentation](https://mise.jdx.dev/bootstrap/packages/brew.html), and `start.sh` adds `/opt/homebrew/bin` to `PATH` for the commands they link there.
 
 ## What the starter does
+
+### On a Mac
 
 `start.sh` is the only Bash, and it needs only the `/bin/bash` 3.2 that every Mac has. In order, it:
 
@@ -78,25 +104,50 @@ A human step runs only when its check fails. The starter then opens the app or s
 
 `WS_REPO_URL` replaces the clone address, which the clean-machine proof uses to clone from a host mirror.
 
+### On Windows
+
+`start.ps1` is the only PowerShell, and it needs only Windows PowerShell 5.1. In order, it:
+
+1. stops with exit status 2, before changing anything, if `-PersonalAccount` is missing or malformed or the computer is not an x64 Windows 11 client edition (build 22631 or later) with virtualization turned on;
+2. takes the named lock `Local\workstation-setup`, so two runs never overlap, and stops with exit status 3 if another run holds it;
+3. downloads a pinned mise release, checks its SHA-256, and installs it into `%USERPROFILE%\.local\bin`;
+4. makes sure winget works, repairing it if it is missing;
+5. installs the pinned Python, uv, and GitHub CLI through mise;
+6. downloads `start.sha256` and checks it against the checksum pinned in `start.ps1`, downloads each file it lists, and checks every one;
+7. runs `start.py` under that Python.
+
+Every download goes over HTTPS with at least TLS 1.2, a time limit, and three tries, and a redirect to another scheme is refused. `start.ps1` keeps a copy of itself in `%LOCALAPPDATA%\workstation-bootstrap`, where the restart entry runs it from.
+
+`start.py` takes the same steps as on a Mac, with these differences:
+
+1. **Windows Subsystem for Linux comes first.** If it is off, Windows asks for administrator approval after the starter says why, and the starter turns it on. When Windows needs a restart, the starter offers a numbered choice. Choosing to restart registers a `RunOnce` entry that runs `start.ps1` again at the next sign-in and schedules `shutdown.exe` after 15 seconds. Declining ends the run with exit status 4 and the instruction to restart and run the same command again.
+2. **The Windows OpenSSH agent service is stopped and disabled**, after the starter says why and Windows asks for administrator approval, because 1Password's SSH agent needs the pipe that service holds. The Windows OpenSSH client must be present.
+3. **The key check is `ssh-add -l`** against that pipe, and every `ssh` and `git` call uses the Windows OpenSSH client with the same pinned host keys and `NUL` as the null device.
+4. **The hand-off is `bin\ws.cmd`** in the cloned repository.
+
+Two environment variables exist for the clean-machine proof, which runs on a hosted Windows Server image: `WS_ALLOW_SERVER_EDITION=1` relaxes only the client-edition test, and `WS_KEEP_SSH_AGENT_SERVICE=1` keeps the agent service so a stand-in key can use it. `WS_SKIP_SUPPORT_CHECK=1` skips the whole support test, for the Arm job.
+
 ## Layout
 
 | Path | Holds |
 |------|-------|
 | `start.sh` | The only Bash: checks the Mac and installs mise, Python, uv, and gh, then runs `start.py` |
+| `start.ps1` | The only PowerShell: the same for Windows, and the restart entry's target |
 | `start.py` | The entrypoint: argument parsing and the order of the steps |
 | `start_base.py`, `start_config.py`, `start_packages.py`, `start_identity.py`, `start_clone.py` | Shared plumbing, the settings loader, the package install, the identity steps, and the clone and hand-off |
-| `start.toml`, `stage1.toml` | The starter's settings and its package list |
+| `start_windows.py` | The Windows host: WSL and the restart, elevation, the SSH agent service, and PATH |
+| `start.toml`, `stage1.toml`, `stage1-windows.toml` | The starter's settings and its package lists |
 | `github_known_hosts` | GitHub's pinned SSH host keys |
 | `start.sha256` | The checksum of each file `start.sh` downloads |
 | `prove.py` | The proof engine's command line, with the `prove_engine/` package |
 | `scripts/` | `check.sh` (every check), `pins.sh` (the release pins), and the commit and agent-file checks |
 | `tests/` | The pytest suite |
 
-The starter modules are flat siblings of `start.py`, not a package, because `start.sh` downloads exactly the files in `start.sha256` into one folder and runs `start.py` from it, where Python finds the siblings next to it. A new starter module must be added to `STARTER_FILES` in `scripts/pins.sh`, and a test fails when it is not.
+The starter modules are flat siblings of `start.py`, not a package, because `start.sh` and `start.ps1` download exactly the files in `start.sha256` into one folder and runs `start.py` from it, where Python finds the siblings next to it. A new starter module must be added to `STARTER_FILES` in `scripts/pins.sh`, and a test fails when it is not.
 
 ## Releasing a starter change
 
-`start.sh` pins one checksum, the one of `start.sha256`, which lists the checksum of every other starter file. A change is released in three commits, each a [Conventional Commit](#commit-messages) with a body:
+`start.sh` and `start.ps1` each pin one checksum, the one of `start.sha256`, which lists the checksum of every other starter file. A change is released in three commits, each a [Conventional Commit](#commit-messages) with a body:
 
 ```sh
 # 1. Commit the changed starter files, e.g. "fix(start): ...", then rewrite the manifest
@@ -104,12 +155,12 @@ scripts/pins.sh manifest
 git add start.sha256
 git commit -m "build(manifest): refresh starter manifest" \
   -m "The starter files changed, so their checksums in the manifest changed."
-# 2. Point start.sh at that commit and the manifest
+# 2. Point start.sh and start.ps1 at that commit and the manifest
 scripts/pins.sh release
-git add start.sh
+git add start.sh start.ps1
 git commit -m "chore(release): pin starter files" \
-  -m "start.sh now pins the commit that holds the refreshed manifest."
-# 3. After the push, print the commit and checksum to use in the bootstrap command
+  -m "start.sh and start.ps1 now pin the commit that holds the refreshed manifest."
+# 3. After the push, print the commit and checksums to use in the bootstrap commands
 scripts/pins.sh show
 ```
 
@@ -166,7 +217,7 @@ Tart is under the Functional Source License 1.1, which permits internal use. To 
 
 ## Checks
 
-`scripts/check.sh` runs shellcheck over every tracked `*.sh` file, ruff and mypy over the Python, the pytest suite through uv, and a gitleaks scan of the full history. The unit tests cover the engine's pure logic and need neither Tart nor a virtual machine. GitHub Actions runs the same script on every push and pull request.
+`scripts/check.sh` runs shellcheck over every tracked `*.sh` file, PSScriptAnalyzer over `start.ps1`, ruff and mypy over the Python, the pytest suite through uv, and a gitleaks scan of the full history. PSScriptAnalyzer runs through a local `pwsh` when there is one and otherwise through the pinned PowerShell container image, so a Mac needs only Docker. The unit tests cover the engine's pure logic and need neither Tart nor a virtual machine. GitHub Actions runs the same script on every push and pull request: every check on Linux, `scripts/check.sh bash32` on macOS, where `/bin/bash` is the 3.2 that `start.sh` must run under, and `scripts/check.sh windows` on `windows-2025`, which runs `start.ps1` under Windows PowerShell 5.1 and the Windows host steps against real Windows commands and the real registry, with stand-ins for the network and the commands that would change the machine.
 
 ```sh
 mise install

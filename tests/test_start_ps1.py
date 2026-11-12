@@ -461,3 +461,69 @@ def test_the_real_computer_answers_the_support_queries_with_the_properties_the_s
     assert "unsupported" not in result.stderr
     assert "virtualization is turned off" not in result.stderr
     assert "download failed" in result.stderr
+
+
+def run_documented_command(
+    box: Sandbox, served: bytes, claimed: str
+) -> subprocess.CompletedProcess[str]:
+    """The README's PowerShell block, serving `served` with TEMP inside the sandbox."""
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## Bootstrap command", 1)[1].split("\n## ", 1)[0]
+    block = re.search(r"```powershell\n(.*?)```", section, flags=re.S)
+    assert block
+    command = (
+        block.group(1)
+        .replace("<commit>", "0" * 40)
+        .replace("<sha256>", claimed)
+        .replace("<email or sign-in address>", ACCOUNT)
+        .replace("& powershell.exe", "& $env:FAKE_POWERSHELL")
+    )
+    served_file = box.fake_dir / "documented-start.ps1"
+    served_file.write_bytes(served)
+    serve = (
+        "function Invoke-WebRequest {\n"
+        "  param([switch]$UseBasicParsing, [Parameter(Mandatory = $true)][string]$Uri,\n"
+        "        [Parameter(Mandatory = $true)][string]$OutFile)\n"
+        f"  Copy-Item -LiteralPath '{served_file}' -Destination $OutFile\n"
+        "}\n"
+    )
+    wrapper = box.root / "documented.ps1"
+    wrapper.write_text(serve + command, encoding="utf-8", newline="\n")
+    marker = box.root / "marker.txt"
+    environment = {
+        **os.environ,
+        "TEMP": str(box.root / "temp"),
+        "MARKER": str(marker),
+        "FAKE_POWERSHELL": str(box.root / "marker-runner.cmd"),
+    }
+    (box.root / "temp").mkdir(exist_ok=True)
+    (box.root / "marker-runner.cmd").write_text('@echo %* > "%MARKER%"\r\n', encoding="ascii")
+    return subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(wrapper)],
+        capture_output=True, text=True, check=False, env=environment, cwd=box.root,
+    )  # fmt: skip
+
+
+def test_the_documented_command_runs_the_script_that_matches_the_hash(sandbox: Sandbox) -> None:
+    body = b"Write-Output 'hello'\n"
+    result = run_documented_command(sandbox, body, sha256(body).upper())
+    assert result.returncode == 0, result.stderr
+    arguments = (sandbox.root / "marker.txt").read_text(encoding="utf-8")
+    assert f"-PersonalAccount {ACCOUNT}" in arguments
+    assert "-ExecutionPolicy Bypass" in arguments
+    match = re.search(r"-File (\S+)", arguments)
+    assert match
+    ran = Path(match.group(1))
+    assert ran.parent.parent == sandbox.root / "temp"
+    assert ran.name == "start.ps1"
+    assert ran.read_bytes() == body
+
+
+def test_the_documented_command_refuses_a_script_that_does_not_match_the_hash(
+    sandbox: Sandbox,
+) -> None:
+    body = b"Write-Output 'hello'\n"
+    result = run_documented_command(sandbox, body + b"# tampered\n", sha256(body))
+    assert result.returncode != 0
+    assert "does not match its SHA-256" in result.stderr
+    assert not (sandbox.root / "marker.txt").exists()
