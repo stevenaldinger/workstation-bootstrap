@@ -115,7 +115,8 @@ def test_tools_still_missing_after_a_clean_install_are_reported(machine: Machine
         ),
         (
             (
-                "* Label: Command Line Tools for Xcode-10.1\n* Label: Command Line Tools for Xcode-9.9\n"
+                "* Label: Command Line Tools for Xcode-10.1\n"
+                "* Label: Command Line Tools for Xcode-9.9\n"
             ),
             "Command Line Tools for Xcode-10.1",
         ),
