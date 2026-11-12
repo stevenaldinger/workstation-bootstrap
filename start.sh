@@ -42,8 +42,8 @@ BREW_BIN="/opt/homebrew/bin"
 KEEPALIVE_SECONDS=50
 # The starter files are listed, with their checksums, in start.sha256 at the commit that last
 # changed them. Only that manifest's own checksum is pinned here.
-FILES_COMMIT="25bc7e6dc4478972034b8ea86c52a2b31c2c5cd3"
-MANIFEST_SHA256="ee7835a2caa3078934cc5fd7dcc7f3416f156e84e7a2f40878aaf8ea9dcb94ad"
+FILES_COMMIT="4dfed37797e9f4bddd4184e8dfacf325c7aa3455"
+MANIFEST_SHA256="99ed1cd052ec2d8f6624b239ce109322f38cdaaf4ced46cecfc8482dcc6ffe32"
 RAW_URL="https://raw.githubusercontent.com/stevenaldinger/workstation-bootstrap/${FILES_COMMIT}"
 # https only, including redirects, and no older TLS than 1.2; a stalled download times out.
 CURL_OPTIONS=(--fail --silent --show-error --location --proto '=https' --proto-redir '=https'

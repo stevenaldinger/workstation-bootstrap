@@ -60,8 +60,8 @@ $WinGetVersion = '1.29.380'
 $MinimumBuild = 22631
 # The starter files are listed, with their checksums, in start.sha256 at the commit that last
 # changed them. Only that manifest's own checksum is pinned here.
-$FilesCommit = '25bc7e6dc4478972034b8ea86c52a2b31c2c5cd3'
-$ManifestSha256 = 'ee7835a2caa3078934cc5fd7dcc7f3416f156e84e7a2f40878aaf8ea9dcb94ad'
+$FilesCommit = '4dfed37797e9f4bddd4184e8dfacf325c7aa3455'
+$ManifestSha256 = '99ed1cd052ec2d8f6624b239ce109322f38cdaaf4ced46cecfc8482dcc6ffe32'
 $RawUrl = "https://raw.githubusercontent.com/stevenaldinger/workstation-bootstrap/$FilesCommit"
 $WorkDir = Join-Path $env:LOCALAPPDATA 'workstation-bootstrap'
 $BinDir = Join-Path $env:USERPROFILE '.local\bin'
