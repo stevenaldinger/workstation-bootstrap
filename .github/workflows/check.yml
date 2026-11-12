@@ -15,6 +15,7 @@ jobs:
   check:
     name: Run Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -28,17 +29,5 @@ jobs:
         with:
           version: 2026.11.6
 
-      - name: Lint shell scripts
-        run: scripts/check.sh shellcheck
-
-      - name: Lint and type-check Python
-        if: ${{ !cancelled() }}
-        run: scripts/check.sh python
-
-      - name: Run tests
-        if: ${{ !cancelled() }}
-        run: scripts/check.sh tests
-
-      - name: Scan history for secrets
-        if: ${{ !cancelled() }}
-        run: scripts/check.sh secrets
+      - name: Run every check
+        run: scripts/check.sh
