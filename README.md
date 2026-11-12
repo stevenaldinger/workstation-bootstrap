@@ -127,7 +127,7 @@ Every download goes over HTTPS with at least TLS 1.2, a time limit, and three tr
 3. **The key check is `ssh-add -l`** against that pipe, and every `ssh` and `git` call uses the Windows OpenSSH client with the same pinned host keys and `NUL` as the null device.
 4. **The hand-off is `bin\ws.cmd`** in the cloned repository.
 
-Two environment variables exist for the clean-machine proof, which runs on a hosted Windows Server image: `WS_ALLOW_SERVER_EDITION=1` relaxes only the client-edition test, and `WS_KEEP_SSH_AGENT_SERVICE=1` keeps the agent service so a stand-in key can use it. `WS_SKIP_SUPPORT_CHECK=1` skips the whole support test, for the Arm job.
+Three environment variables exist for the clean-machine proof, which runs on a hosted Windows Server image: `WS_ALLOW_SERVER_EDITION=1` relaxes only the client-edition test, `WS_KEEP_SSH_AGENT_SERVICE=1` keeps the agent service so a stand-in key can use it, and `WS_SKIP_GITHUB_HANDSHAKE=1` skips the whole key-registration step, because the runner has no GitHub identity; the step prints one line saying it was skipped. `WS_SKIP_SUPPORT_CHECK=1` skips the whole support test, for the Arm job.
 
 ## Layout
 

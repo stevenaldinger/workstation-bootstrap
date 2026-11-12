@@ -23,7 +23,8 @@ identity steps, `start_clone.py` clones and hands off, `start_macos.py` installs
 Line Tools on a Mac, and `start_windows.py` holds the Windows host's own steps: WSL, the
 restart, elevation, and the SSH agent service. The `WS_KEEP_SSH_AGENT_SERVICE=1` environment
 variable keeps that service running; the clean-machine proof sets it because its stand-in SSH
-agent is that service.
+agent is that service. The proof also sets `WS_SKIP_GITHUB_HANDSHAKE=1`, which skips the whole
+key-registration step because its runner has no GitHub identity.
 """
 
 from __future__ import annotations
@@ -58,6 +59,7 @@ from start_identity import create_key, enable_integrations, register_key, sign_i
 from start_packages import install_stage1
 
 REPO_URL_ENV = "WS_REPO_URL"
+SKIP_HANDSHAKE_ENV = "WS_SKIP_GITHUB_HANDSHAKE"
 
 
 def select_platform() -> Platform:
@@ -74,6 +76,11 @@ def select_platform() -> Platform:
 def host_steps(ctx: Context, steps: Sequence[NamedStep]) -> list[tuple[str, Callable[[], None]]]:
     """A platform's own steps, bound to the context."""
     return [(title_id, lambda step=step: step(ctx)) for title_id, step in steps]  # type: ignore[misc]
+
+
+def skip_registration(ctx: Context) -> None:
+    """Stand in for the key-registration step when the proof switch skips it."""
+    ctx.console.say("register.skipped", switch=SKIP_HANDSHAKE_ENV)
 
 
 def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
@@ -132,6 +139,7 @@ def main(
         platform=platform or select_platform(),
     )
     url = env.get(REPO_URL_ENV) or config.repository.url
+    skip_handshake = env.get(SKIP_HANDSHAKE_ENV) == "1"
     steps: list[tuple[str, Callable[[], None]]] = [
         *host_steps(ctx, ctx.platform.steps_before_packages),
         ("stage1.title", lambda: install_stage1(ctx, args.stage1)),
@@ -139,7 +147,10 @@ def main(
         *host_steps(ctx, ctx.platform.steps_before_integrations),
         ("integrations.title", lambda: enable_integrations(ctx)),
         ("key.title", lambda: create_key(ctx)),
-        ("register.title", lambda: register_key(ctx)),
+        (
+            "register.title",
+            (lambda: skip_registration(ctx)) if skip_handshake else (lambda: register_key(ctx)),
+        ),
         ("clone.title", lambda: clone_repository(ctx, url)),
         ("handoff.title", lambda: hand_off(ctx, extra, execv or ctx.platform.execv)),
     ]

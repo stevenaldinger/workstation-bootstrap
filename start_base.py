@@ -76,6 +76,7 @@ MESSAGES: dict[str, str] = {
     "key.unreadable": "The public key of {item} could not be read: {detail}",
     "register.title": "Register the key with GitHub",
     "register.registered": "Registered the key on GitHub.",
+    "register.skipped": "Skipped: {switch}=1, so the key is not registered or checked with GitHub.",
     "register.failed": "Registering the key failed: {detail}",
     "register.scope-kept": (
         "The {scope} scope is still on the GitHub token ({detail}). Remove it with: "

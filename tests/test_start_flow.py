@@ -95,6 +95,7 @@ def run_starter(
     recorder: Recorder,
     handoff: Exec,
     extra: Sequence[str] = (),
+    environ: Mapping[str, str] | None = None,
 ) -> int:
     stage1 = machine.home.parent / "stage1.toml"
     stage1.write_text("[bootstrap.packages]\n", encoding="utf-8")
@@ -106,7 +107,7 @@ def run_starter(
         stream=recorder.stream,
         socket_ready=machine.socket_ready,
         execv=handoff,
-        environ={start.REPO_URL_ENV: str(mirror)},
+        environ={start.REPO_URL_ENV: str(mirror), **(environ or {})},
     )
 
 
@@ -129,6 +130,21 @@ def test_a_fresh_machine_reaches_the_identity_before_the_clone(
     assert handoff.calls == [
         (str(clone_dir / "bin" / "ws"), [str(clone_dir / "bin" / "ws"), "bootstrap"])
     ]
+
+
+def test_the_proof_switch_skips_the_whole_registration_step_and_says_so(
+    machine: Machine, mirror: Path
+) -> None:
+    satisfied(machine)
+    session, recorder, handoff = make_session(), Recorder(), Exec()
+    switch = {start.SKIP_HANDSHAKE_ENV: "1"}
+    assert run_starter(machine, session, mirror, recorder, handoff, environ=switch) == 0
+    assert session.console.shown.count("register.skipped") == 1
+    assert any(base.MESSAGES["register.title"] in line for line in session.lines)
+    assert recorder.count("ssh") == 0
+    assert recorder.count("gh") == 0
+    assert not machine.world["gh"]["keys"]
+    assert len(handoff.calls) == 1
 
 
 def test_stage_one_reads_only_its_own_package_list(machine: Machine, mirror: Path) -> None:
