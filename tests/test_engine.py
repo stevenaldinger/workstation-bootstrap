@@ -31,11 +31,18 @@ from prove_engine.disk import disk_is_grown, grow_layout
 from prove_engine.model import Base, RunResult
 
 
-def test_ensure_tart_rejects_a_tampered_archive_before_unpacking(tmp_path: Path) -> None:
+def test_ensure_tart_rejects_a_tampered_archive_before_unpacking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     runner = FakeRunner()
     engine = make_engine(tmp_path, runner)
     engine.release_dir.mkdir(parents=True)
     (engine.release_dir / "tart.tar.gz").write_bytes(b"not the pinned release")
+
+    def fetch_the_same_wrong_bytes(url: str, destination: Path) -> None:
+        destination.write_bytes(b"not the pinned release")
+
+    monkeypatch.setattr(engine_module, "download", fetch_the_same_wrong_bytes)
     with pytest.raises(ProofError, match="checksum mismatch"):
         engine.ensure_tart()
     assert not engine.tart.exists()
@@ -388,3 +395,87 @@ def test_run_reports_a_failing_script_without_raising(
     outcome = engine.run("first-run", script="exit 7\n", timeout=30)
     assert outcome.command.exit_code == 7
     assert any(c.startswith("delete wsrun-first-run-") for c in runner.tart_calls())
+
+
+# --- Limits on Tart commands ---------------------------------------------------------
+
+
+def test_pull_and_clone_get_long_limits_and_pull_reports_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = FakeRunner(
+        [
+            ("--version", result_of(pins.TART_VERSION + "\n")),
+            ("get ws-base-26", result_of('{"Disk": 100}')),
+        ]
+    )
+    engine = make_engine(tmp_path, runner)
+    stage_unpacked_tart(engine, monkeypatch)
+    stage_grown_base(engine.tart_home / "vms" / "ws-base-26" / "disk.img")
+    engine.base(26)
+    calls = zip(runner.calls, runner.timeouts, runner.progress, strict=True)
+    limits = {call[1]: (timeout, label) for call, timeout, label in calls if "/tart" in call[0]}
+    assert limits["pull"][0] == pins.PULL_TIMEOUT_SECONDS
+    assert limits["pull"][1] is not None
+    assert limits["clone"][0] == pins.CLONE_TIMEOUT_SECONDS
+    assert limits["get"][0] == pins.TART_TIMEOUT_SECONDS
+
+
+def test_a_tart_command_that_times_out_is_reported_as_such(tmp_path: Path) -> None:
+    timed_out = CommandResult(("tart",), pins.EXIT_TIMED_OUT, "", "", True)
+    engine = make_engine(tmp_path, FakeRunner([("pull", timed_out)]))
+    with pytest.raises(ProofError, match=r"tart pull x timed out after 5s"):
+        engine.checked("pull", "x", timeout=5)
+
+
+def test_two_runs_of_one_scenario_in_one_second_get_different_clone_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine_module, "utc_stamp", lambda: "20260101000000")
+    runner = FakeRunner([("list", result_of(""))])
+    engine = make_engine(tmp_path, runner)
+    base = Base(select_image(26), "ws-base-26")
+    names = []
+    for _ in range(2):
+        with engine.machine("first-run", base) as vm:
+            names.append(vm.name)
+    assert names[0] != names[1]
+    assert all(name.startswith("wsrun-first-run-20260101000000-") for name in names)
+
+
+def test_a_corrupt_cached_tart_archive_is_downloaded_once_more(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = FakeRunner([("--version", result_of(pins.TART_VERSION + "\n"))])
+    engine = make_engine(tmp_path, runner)
+    stage_unpacked_tart(engine, monkeypatch)
+    archive = engine.release_dir / "tart.tar.gz"
+    archive.write_bytes(b"half a download")
+    downloads: list[str] = []
+
+    def fetch(url: str, destination: Path) -> None:
+        downloads.append(url)
+        destination.write_bytes(b"stand-in")
+
+    monkeypatch.setattr(engine_module, "download", fetch)
+    assert engine.ensure_tart() == engine.tart
+    assert downloads == [pins.TART_URL]
+
+
+def test_a_tart_archive_that_is_still_wrong_after_a_fresh_download_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = make_engine(tmp_path, FakeRunner())
+    stage_unpacked_tart(engine, monkeypatch)
+    archive = engine.release_dir / "tart.tar.gz"
+    archive.write_bytes(b"corrupt")
+    downloads: list[str] = []
+
+    def fetch(url: str, destination: Path) -> None:
+        downloads.append(url)
+        destination.write_bytes(b"also not the release")
+
+    monkeypatch.setattr(engine_module, "download", fetch)
+    with pytest.raises(ProofError, match="checksum mismatch"):
+        engine.ensure_tart()
+    assert len(downloads) == 1

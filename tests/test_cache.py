@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from support import FakeRunner, make_engine, result_of
 
+import prove_engine.engine as engine_module
 from prove_engine import Engine, ProofError, cache, cli
 from prove_engine.lock import HostLock
 
@@ -107,10 +108,16 @@ def test_a_refused_purge_does_not_reap_or_touch_the_lock(tmp_path: Path) -> None
     assert runner.calls == []
 
 
-def test_the_engine_marks_its_root_on_first_use(tmp_path: Path) -> None:
+def test_the_engine_marks_its_root_on_first_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def offline(url: str, destination: Path) -> None:
+        raise ProofError("offline")
+
+    monkeypatch.setattr(engine_module, "download", offline)
     engine = make_engine(tmp_path, FakeRunner())
     assert not engine.cache_root.exists()
-    with pytest.raises(ProofError):
+    with pytest.raises(ProofError, match="offline"):
         engine.ensure_tart()
     assert cache.is_engine_root(engine.cache_root)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -20,3 +21,13 @@ def tests_do_not_read_the_host_disk(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError(f"a test read the real disk usage of {path}; inject a probe instead")
 
     monkeypatch.setattr(shutil, "disk_usage", refuse)
+
+
+@pytest.fixture(autouse=True)
+def tests_do_not_reach_the_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail a test that opens a URL; a test that needs a download replaces `download` instead."""
+
+    def refuse(url: object, *args: object, **kwargs: object) -> object:
+        raise AssertionError(f"a test opened {url}; replace the download with a fake")
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)

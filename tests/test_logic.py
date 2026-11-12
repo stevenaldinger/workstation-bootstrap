@@ -112,7 +112,9 @@ def test_check_free_space_boundary(free_gb: int, required_gb: int, ok: bool) -> 
     ["first-run", "a", "re-run-2", "x" * 41],
 )
 def test_machine_name_accepts_simple_scenarios(scenario: str) -> None:
-    assert logic.machine_name(scenario, "20260101000000") == (f"wsrun-{scenario}-20260101000000")
+    assert logic.machine_name(scenario, "20260101000000", "a1b2c3") == (
+        f"wsrun-{scenario}-20260101000000-a1b2c3"
+    )
 
 
 @pytest.mark.parametrize(
@@ -121,7 +123,7 @@ def test_machine_name_accepts_simple_scenarios(scenario: str) -> None:
 )
 def test_machine_name_rejects_unsafe_scenarios(scenario: str) -> None:
     with pytest.raises(ProofError, match="scenario names"):
-        logic.machine_name(scenario, "20260101000000")
+        logic.machine_name(scenario, "20260101000000", "a1b2c3")
 
 
 # --- Shares --------------------------------------------------------------------------

@@ -81,7 +81,10 @@ class RunResult:
 
 
 class Runner(Protocol):
-    """Runs a command to completion and returns what it printed."""
+    """Runs a command to completion and returns what it printed.
+
+    A command given `progress` is named in a still-running line on stderr while it works.
+    """
 
     def __call__(
         self,
@@ -90,6 +93,7 @@ class Runner(Protocol):
         env: Mapping[str, str] | None = None,
         timeout: float | None = None,
         stdin: str | None = None,
+        progress: str | None = None,
     ) -> CommandResult: ...
 
 

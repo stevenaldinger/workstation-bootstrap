@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
-import signal
 import subprocess
 import time
 from collections.abc import Sequence
@@ -29,6 +27,7 @@ from prove_engine.pins import (
     STOP_SECONDS,
     VNC_WAIT_SECONDS,
 )
+from prove_engine.process import kill_group
 
 if TYPE_CHECKING:
     from prove_engine.engine import Engine
@@ -155,7 +154,7 @@ class Machine:
             try:
                 self._proc.wait(timeout=STOP_SECONDS)
             except subprocess.TimeoutExpired:
-                os.killpg(self._proc.pid, signal.SIGKILL)
+                kill_group(self._proc.pid)
                 self._proc.wait()
         if self._log is not None:
             self._log.close()

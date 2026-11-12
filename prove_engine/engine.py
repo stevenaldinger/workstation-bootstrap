@@ -38,16 +38,19 @@ from prove_engine.model import (
 )
 from prove_engine.pins import (
     BASE_PREFIX,
+    CLONE_TIMEOUT_SECONDS,
     DEFAULT_COMMAND,
     DISK_GB,
     FREE_GB_FIRST_PULL,
     FREE_GB_PER_RUN,
+    PULL_TIMEOUT_SECONDS,
     RUN_PREFIX,
     TART_SHA256,
+    TART_TIMEOUT_SECONDS,
     TART_URL,
     TART_VERSION,
 )
-from prove_engine.process import run_command, spawn_process, utc_stamp
+from prove_engine.process import run_command, spawn_process, unique_suffix, utc_stamp
 from prove_engine.toolchain import download, unpack_tart
 
 
@@ -75,11 +78,19 @@ class Engine:
         self.logs = cache_root / "logs"
         self.env = {**env, "TART_HOME": str(self.tart_home)}
 
-    def tart_cmd(self, *args: str, timeout: float | None = None) -> CommandResult:
-        return self.runner([str(self.tart), *args], env=self.env, timeout=timeout)
+    def tart_cmd(
+        self, *args: str, timeout: float = TART_TIMEOUT_SECONDS, progress: str | None = None
+    ) -> CommandResult:
+        return self.runner(
+            [str(self.tart), *args], env=self.env, timeout=timeout, progress=progress
+        )
 
-    def checked(self, *args: str, timeout: float | None = None) -> CommandResult:
-        result = self.tart_cmd(*args, timeout=timeout)
+    def checked(
+        self, *args: str, timeout: float = TART_TIMEOUT_SECONDS, progress: str | None = None
+    ) -> CommandResult:
+        result = self.tart_cmd(*args, timeout=timeout, progress=progress)
+        if result.timed_out:
+            raise ProofError(f"tart {' '.join(args)} timed out after {timeout:.0f}s")
         if result.exit_code != 0:
             detail = (result.stderr or result.stdout).strip()
             raise ProofError(f"tart {' '.join(args)} failed ({result.exit_code}): {detail}")
@@ -89,6 +100,9 @@ class Engine:
         claim_root(self.cache_root)
         archive = self.release_dir / "tart.tar.gz"
         self.release_dir.mkdir(parents=True, exist_ok=True)
+        if archive.exists() and not archive_matches(archive):
+            # A cached archive that fails its checksum is a partial or damaged download.
+            archive.unlink()
         if not archive.exists():
             download(TART_URL, archive)
         verify_sha256(archive, TART_SHA256)
@@ -112,8 +126,13 @@ class Engine:
         if name not in self.local_vms():
             self.tart_home.mkdir(parents=True, exist_ok=True)
             check_free_space(self.free_space(self.tart_home), FREE_GB_FIRST_PULL)
-            self.checked("pull", image.ref)
-            self.checked("clone", image.ref, name)
+            self.checked(
+                "pull",
+                image.ref,
+                timeout=PULL_TIMEOUT_SECONDS,
+                progress=f"tart pull of macOS {image.major} ({image.tag})",
+            )
+            self.checked("clone", image.ref, name, timeout=CLONE_TIMEOUT_SECONDS)
         self.ensure_disk(name)
         return Base(image, name)
 
@@ -150,8 +169,8 @@ class Engine:
             claim_root(self.cache_root)
             self.tart_home.mkdir(parents=True, exist_ok=True)
             check_free_space(self.free_space(self.tart_home), FREE_GB_PER_RUN)
-            vm = Machine(self, machine_name(scenario, utc_stamp()), base)
-            self.checked("clone", base.name, vm.name)
+            vm = Machine(self, machine_name(scenario, utc_stamp(), unique_suffix()), base)
+            self.checked("clone", base.name, vm.name, timeout=CLONE_TIMEOUT_SECONDS)
             try:
                 yield vm
             finally:
@@ -221,6 +240,14 @@ class Engine:
         if purge:
             purge_root(self.cache_root, home)
         return reaped
+
+
+def archive_matches(archive: Path) -> bool:
+    try:
+        verify_sha256(archive, TART_SHA256)
+    except ProofError:
+        return False
+    return True
 
 
 def enable_gatekeeper(vm: Machine) -> str:

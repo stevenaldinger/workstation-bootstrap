@@ -29,6 +29,7 @@ class FakeRunner:
         self.calls: list[tuple[str, ...]] = []
         self.timeouts: list[float | None] = []
         self.stdins: list[str | None] = []
+        self.progress: list[str | None] = []
 
     def __call__(
         self,
@@ -37,7 +38,9 @@ class FakeRunner:
         env: Mapping[str, str] | None = None,
         timeout: float | None = None,
         stdin: str | None = None,
+        progress: str | None = None,
     ) -> CommandResult:
+        self.progress.append(progress)
         self.calls.append(tuple(argv))
         self.timeouts.append(timeout)
         self.stdins.append(stdin)

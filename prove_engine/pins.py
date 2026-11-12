@@ -11,7 +11,8 @@ TART_URL = f"https://github.com/cirruslabs/tart/releases/download/{TART_VERSION}
 TART_SHA256 = "e680a734febccfce7d4e910c1f7f13fc3b00f19a181c945e2d746de3214c32c2"
 
 GUEST_USER = "admin"
-GUEST_PASSWORD = "admin"
+# The vanilla image's well-known login. The guest is a throwaway clone with no data in it.
+GUEST_PASSWORD = "admin"  # noqa: S105
 DEFAULT_COMMAND = "sw_vers -productVersion && uname -m"
 BASE_PREFIX = "ws-base-"
 RUN_PREFIX = "wsrun-"
@@ -28,20 +29,33 @@ SSH_READY_SECONDS = 120
 VNC_WAIT_SECONDS = 30
 STOP_SECONDS = 30
 EXIT_TIMED_OUT = 124
+# Every Tart command has a time limit so a stuck one cannot hang a run. `tart pull` moves about
+# 24 GB, so it prints a still-running line every HEARTBEAT_SECONDS and has a long limit.
+TART_TIMEOUT_SECONDS = 120
+CLONE_TIMEOUT_SECONDS = 1800
+PULL_TIMEOUT_SECONDS = 4 * 3600
+HEARTBEAT_SECONDS = 30
 
-SSH_OPTIONS = (
-    "-F", "/dev/null",
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "UserKnownHostsFile=/dev/null",
-    "-o", "GlobalKnownHostsFile=/dev/null",
-    "-o", "LogLevel=ERROR",
-    "-o", "PubkeyAuthentication=no",
-    "-o", "PreferredAuthentications=password,keyboard-interactive",
-    "-o", "NumberOfPasswordPrompts=1",
-    "-o", "ConnectTimeout=10",
-    "-o", "ServerAliveInterval=15",
-    "-o", "ServerAliveCountMax=4",
-)  # fmt: skip
+# How the engine reaches the throwaway guest. The guest is cloned fresh for every run, so its
+# host key changes each time and a known_hosts file would only produce false alarms
+# (StrictHostKeyChecking=no, no known_hosts). It accepts only the image's well-known password
+# (PubkeyAuthentication=no). Host config is ignored (-F /dev/null), LogLevel=ERROR hides the
+# "Permanently added" notice, and the keepalive options end a hung session instead of
+# waiting for the command timeout.
+_SSH_OPTION_PAIRS = (
+    ("-F", "/dev/null"),
+    ("-o", "StrictHostKeyChecking=no"),
+    ("-o", "UserKnownHostsFile=/dev/null"),
+    ("-o", "GlobalKnownHostsFile=/dev/null"),
+    ("-o", "LogLevel=ERROR"),
+    ("-o", "PubkeyAuthentication=no"),
+    ("-o", "PreferredAuthentications=password,keyboard-interactive"),
+    ("-o", "NumberOfPasswordPrompts=1"),
+    ("-o", "ConnectTimeout=10"),
+    ("-o", "ServerAliveInterval=15"),
+    ("-o", "ServerAliveCountMax=4"),
+)
+SSH_OPTIONS = tuple(part for pair in _SSH_OPTION_PAIRS for part in pair)
 
 
 IMAGES = (

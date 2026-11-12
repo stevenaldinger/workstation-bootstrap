@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import time
 from pathlib import Path
@@ -170,3 +171,58 @@ def test_restore_replaces_the_machine_with_its_snapshot(
     monkeypatch.setattr(Machine, "start", lambda self, shares=(), *, vnc=False: {})
     vm.restore("clean")
     assert runner.tart_calls() == ["delete wsrun-x-1", "clone wsrun-x-1-snap-clean wsrun-x-1"]
+
+
+# --- Heartbeat, timeouts, and a process group that is already gone --------------------
+
+
+def test_run_command_prints_a_still_running_line_while_it_works(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = run_command(
+        ["/bin/sh", "-c", "sleep 1; echo done"], timeout=10, progress="a slow step", heartbeat=0.3
+    )
+    assert result.stdout == "done\n"
+    lines = [line for line in capsys.readouterr().err.splitlines() if "still running" in line]
+    assert len(lines) >= 2
+    assert all("a slow step" in line for line in lines)
+
+
+def test_run_command_prints_nothing_without_a_progress_name(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_command(["/bin/sh", "-c", "sleep 0.6"], timeout=10, heartbeat=0.2)
+    assert capsys.readouterr().err == ""
+
+
+def test_run_command_sends_stdin_once_across_heartbeats() -> None:
+    result = run_command(
+        ["/bin/sh", "-c", "sleep 0.8; cat"],
+        timeout=10,
+        stdin="payload",
+        progress="x",
+        heartbeat=0.2,
+    )
+    assert result.stdout == "payload"
+
+
+def test_run_command_still_times_out_while_reporting_progress() -> None:
+    started = time.monotonic()
+    result = run_command(["/bin/sleep", "30"], timeout=0.6, progress="x", heartbeat=0.2)
+    assert result.timed_out
+    assert time.monotonic() - started < 10
+
+
+@pytest.mark.parametrize("error", [ProcessLookupError, PermissionError])
+def test_a_process_group_that_ended_before_the_kill_is_not_an_error(
+    monkeypatch: pytest.MonkeyPatch, error: type[OSError]
+) -> None:
+    real_killpg = os.killpg
+
+    def kill_then_report_gone(pid: int, sig: int) -> None:
+        real_killpg(pid, sig)
+        raise error
+
+    monkeypatch.setattr(os, "killpg", kill_then_report_gone)
+    result = run_command(["/bin/sleep", "30"], timeout=0.3)
+    assert result.timed_out

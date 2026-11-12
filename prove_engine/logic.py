@@ -64,8 +64,8 @@ def validate_scenario(scenario: str) -> str:
     return scenario
 
 
-def machine_name(scenario: str, stamp: str) -> str:
-    return f"{RUN_PREFIX}{validate_scenario(scenario)}-{stamp}"
+def machine_name(scenario: str, stamp: str, suffix: str) -> str:
+    return f"{RUN_PREFIX}{validate_scenario(scenario)}-{stamp}-{suffix}"
 
 
 def parse_share(spec: str) -> Share:

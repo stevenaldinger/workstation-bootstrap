@@ -72,6 +72,33 @@ def migrate_default_root(engine: Engine) -> None:
         print(f"moved {', '.join(moved)} from {LEGACY_CACHE_ROOT} to {DEFAULT_CACHE_ROOT}")
 
 
+def read_script(args: argparse.Namespace) -> str:
+    """The script to run: the --script file, or the --command text."""
+    if args.script is None:
+        return str(args.shell_command) + "\n"
+    try:
+        return Path(args.script).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        reason = getattr(exc, "strerror", None) or str(exc)
+        raise ProofError(f"cannot read --script {args.script}: {reason}") from exc
+
+
+def run_scenario(args: argparse.Namespace, engine: Engine) -> int:
+    outcome = engine.run(
+        args.scenario,
+        script=read_script(args),
+        timeout=args.timeout,
+        shares=[parse_share(spec) for spec in args.share],
+        target_major=args.target_major,
+        out_dir=args.out,
+        keep_vm=args.keep_vm,
+    )
+    sys.stdout.write(outcome.command.stdout)
+    sys.stderr.write(outcome.command.stderr)
+    print(json.dumps({"env": outcome.env, "timings": outcome.timings}, indent=2))
+    return 0 if outcome.command.exit_code == 0 else 1
+
+
 def dispatch(args: argparse.Namespace, engine: Engine) -> int:
     if args.action == "tart":
         print(engine.ensure_tart())
@@ -83,23 +110,10 @@ def dispatch(args: argparse.Namespace, engine: Engine) -> int:
         print("\n".join(n for n in engine.local_vms() if n.startswith(RUN_PREFIX)))
     elif args.action == "cleanup":
         print(json.dumps({"reaped": engine.cleanup(purge=args.purge), "purged": args.purge}))
+    elif args.action == "run":
+        return run_scenario(args, engine)
     else:
-        script = (
-            args.script.read_text(encoding="utf-8") if args.script else args.shell_command + "\n"
-        )
-        outcome = engine.run(
-            args.scenario,
-            script=script,
-            timeout=args.timeout,
-            shares=[parse_share(spec) for spec in args.share],
-            target_major=args.target_major,
-            out_dir=args.out,
-            keep_vm=args.keep_vm,
-        )
-        sys.stdout.write(outcome.command.stdout)
-        sys.stderr.write(outcome.command.stderr)
-        print(json.dumps({"env": outcome.env, "timings": outcome.timings}, indent=2))
-        return 0 if outcome.command.exit_code == 0 else 1
+        raise ProofError(f"unknown action {args.action!r}")
     return 0
 
 
@@ -119,7 +133,3 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ProofError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

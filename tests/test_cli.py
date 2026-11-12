@@ -46,12 +46,10 @@ def test_parse_args_run_defaults() -> None:
 
 def test_parse_args_run_options() -> None:
     args = parse_args(
-        [
-            "--cache-root", "/c",
-            "run", "preview", "--target-major", "27", "--share", "a=/x:ro", "--share", "b=/y",
-            "--timeout", "30", "--out", "/o", "--keep-vm", "--script", "/s.sh",
-        ]
-    )  # fmt: skip
+        ["--cache-root", "/c", "run", "preview", "--target-major", "27"]
+        + ["--share", "a=/x:ro", "--share", "b=/y", "--timeout", "30"]
+        + ["--out", "/o", "--keep-vm", "--script", "/s.sh"]
+    )
     assert args.cache_root == Path("/c")
     assert (args.target_major, args.share, args.timeout) == (27, ["a=/x:ro", "b=/y"], 30)
     assert args.keep_vm and args.script == Path("/s.sh")
@@ -89,3 +87,24 @@ def test_main_rejects_a_bad_share_before_any_download(
     assert main(["--cache-root", str(cache), "run", "ok", "--share", "bad"]) == 2
     assert "share must look like" in capsys.readouterr().err
     assert not cache.exists()
+
+
+def test_main_reports_a_missing_script_as_an_engine_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cache = tmp_path / "cache"
+    missing = tmp_path / "missing.sh"
+    assert main(["--cache-root", str(cache), "run", "ok", "--script", str(missing)]) == 2
+    err = capsys.readouterr().err
+    assert "cannot read --script" in err
+    assert "Traceback" not in err
+    assert not cache.exists()
+
+
+def test_main_reports_an_undecodable_script_as_an_engine_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = tmp_path / "binary.sh"
+    script.write_bytes(b"\xff\xfe\x00")
+    assert main(["--cache-root", str(tmp_path / "c"), "run", "ok", "--script", str(script)]) == 2
+    assert "cannot read --script" in capsys.readouterr().err
