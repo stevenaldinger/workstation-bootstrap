@@ -43,16 +43,22 @@ class Sandbox:
             stub = bin_dir / tool
             stub.write_text(STUB, encoding="utf-8")
             stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+        uname = bin_dir / "uname"
+        uname.write_text('#!/bin/sh\necho "$FAKE_UNAME"\n', encoding="utf-8")
+        uname.chmod(uname.stat().st_mode | stat.S_IXUSR)
         git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.com"]
         subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
         subprocess.run([*git, "add", "-A"], check=True)
         subprocess.run([*git, "commit", "-q", "-m", "chore(test): seed"], check=True)
 
-    def run(self, *args: str, fail: str = "") -> subprocess.CompletedProcess[str]:
+    def run(
+        self, *args: str, fail: str = "", system: str = "Linux"
+    ) -> subprocess.CompletedProcess[str]:
         env = {
             "PATH": os.pathsep.join([str(self.root / "bin"), "/usr/bin", "/bin"]),
             "FAKE_LOG": str(self.log),
             "FAKE_FAIL": fail,
+            "FAKE_UNAME": system,
             "HOME": str(self.root),
         }
         if "CHECK_BASE_SHA" in os.environ:
@@ -139,6 +145,24 @@ def test_the_commits_check_runs_without_a_base_when_none_is_given(
     monkeypatch.delenv("CHECK_BASE_SHA", raising=False)
     assert sandbox.run("commits").returncode == 0
     assert "--base" not in sandbox.commands()
+
+
+def test_bash32_runs_the_start_sh_sandbox_tests_on_macos(sandbox: Sandbox) -> None:
+    result = sandbox.run("bash32", system="Darwin")
+    assert result.returncode == 0, result.stderr
+    assert "pytest -q tests/test_start_sh.py" in sandbox.commands()
+
+
+def test_bash32_refuses_to_run_off_macos(sandbox: Sandbox) -> None:
+    result = sandbox.run("bash32", system="Linux")
+    assert result.returncode == 1
+    assert "macOS" in result.stderr
+    assert sandbox.commands() == ""
+
+
+def test_all_does_not_include_the_macos_only_check(sandbox: Sandbox) -> None:
+    assert sandbox.run().returncode == 0
+    assert "test_start_sh.py" not in sandbox.commands()
 
 
 def test_a_single_target_runs_only_that_check(sandbox: Sandbox) -> None:

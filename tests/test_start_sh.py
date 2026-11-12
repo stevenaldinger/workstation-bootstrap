@@ -194,6 +194,14 @@ def test_a_failed_download_is_reported(sandbox: Sandbox) -> None:
     assert sandbox.calls("mise") == []
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="the system bash 3.2 ships with macOS")
+def test_the_runner_executes_start_sh_under_the_bash_that_macos_ships() -> None:
+    version = subprocess.run(
+        ["/bin/bash", "--version"], capture_output=True, text=True, check=True
+    ).stdout
+    assert "version 3.2" in version
+
+
 def test_start_sh_stays_small() -> None:
     lines = START_SH.read_text(encoding="utf-8").splitlines()
     assert len(lines) <= 60

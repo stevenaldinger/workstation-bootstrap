@@ -15,6 +15,7 @@ set -euo pipefail
 #   scripts/check.sh secrets       # Scan the full Git history with gitleaks
 #   scripts/check.sh commits       # Validate commit messages (CHECK_BASE_SHA bounds the range)
 #   scripts/check.sh agent-files   # Validate the agent instruction files
+#   scripts/check.sh bash32        # Run the start.sh sandbox tests (macOS only)
 #   scripts/check.sh -h            # Show help
 #
 # What it does:
@@ -25,6 +26,8 @@ set -euo pipefail
 #   - shellcheck, uv, and gitleaks come from the path; mise.toml pins them.
 #   - The ruff, mypy, and pytest versions are pinned here, so Python checks need no
 #     project or lock file; tool settings live in pyproject.toml.
+#   - `bash32` is separate from `all` because it only means something on macOS, where
+#     /bin/bash is the 3.2 that start.sh must run under; the macOS CI job runs it.
 #   - CHECK_BASE_SHA is the commit before the pushed range. CI passes the push's `before`
 #     commit; without it, the commits check uses the recorded base.
 # =============================================================================
@@ -38,7 +41,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 show_help() {
   cat <<EOF
-Usage: $(basename "$0") [shellcheck|python|tests|secrets|commits|agent-files|all]
+Usage: $(basename "$0") [shellcheck|python|tests|secrets|commits|agent-files|bash32|all]
 
 Runs the repository checks. With no argument, runs every check and reports each failure.
 
@@ -94,6 +97,14 @@ run_agent_files() {
   (cd "${REPO_ROOT}" && uv run --no-project scripts/check_agent_files.py)
 }
 
+run_bash32() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "error: bash32 runs on macOS, where /bin/bash is bash 3.2" >&2
+    return 1
+  fi
+  (cd "${REPO_ROOT}" && uv run --no-project --with "pytest==${PYTEST_VERSION}" pytest -q tests/test_start_sh.py)
+}
+
 run_named() {
   case "$1" in
     shellcheck) run_shellcheck ;;
@@ -102,6 +113,7 @@ run_named() {
     secrets) run_secrets ;;
     commits) run_commits ;;
     agent-files) run_agent_files ;;
+    bash32) run_bash32 ;;
     *) return 2 ;;
   esac
 }
@@ -131,11 +143,11 @@ main() {
     all)
       run_all
       ;;
-    shellcheck | python | tests | secrets | commits | agent-files)
+    shellcheck | python | tests | secrets | commits | agent-files | bash32)
       run_named "${target}"
       ;;
     *)
-      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|commits|agent-files|all]" >&2
+      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|commits|agent-files|bash32|all]" >&2
       return 2
       ;;
   esac

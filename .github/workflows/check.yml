@@ -14,9 +14,19 @@ permissions:
 
 jobs:
   check:
-    name: Run Checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: Run Checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Every check on Linux.
+          - os: ubuntu-latest
+            target: all
+          # start.sh must run under the 3.2 bash that macOS ships, which Linux runners lack.
+          - os: macos-latest
+            target: bash32
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -30,8 +40,9 @@ jobs:
         with:
           version: 2026.11.6
 
-      - name: Run every check
+      - name: Run the checks for this runner
         env:
           # The commit before the new commits: a push's previous head, or a pull request's base.
           CHECK_BASE_SHA: ${{ github.event.before || github.event.pull_request.base.sha }}
-        run: scripts/check.sh
+          CHECK_TARGET: ${{ matrix.target }}
+        run: scripts/check.sh "$CHECK_TARGET"
