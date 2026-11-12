@@ -27,6 +27,9 @@ against a permissive stand-in. Output formats follow the real producers:
 - `wsl.exe --status` and `wsl.exe --install --no-distribution` follow
   https://learn.microsoft.com/windows/wsl/basic-commands; installing needs elevation, and an
   exit status of 3010 (ERROR_SUCCESS_REBOOT_REQUIRED) means a restart is required.
+- `winget.exe --version` prints the client version, as `winget --version` does
+  (https://learn.microsoft.com/windows/package-manager/winget/); no other winget command is
+  modeled, because mise's `winget:` installs are faked at the `mise` boundary.
 - `shutdown.exe /r /t <seconds> /c <comment>` follows
   https://learn.microsoft.com/windows-server/administration/windows-commands/shutdown; the
   comment is at most 512 characters.
@@ -62,7 +65,7 @@ SHUTDOWN_COMMENT_LIMIT = 512
 # Set while a command runs as the target of an elevated Start-Process.
 ELEVATED = {"on": False}
 # Environment variables a call records, so tests can see what a command ran with.
-LOGGED_ENV = ("MISE_YES", "PATH", "WSL_UTF8")
+LOGGED_ENV = ("MISE_YES", "PATH", "WSL_UTF8", "PYTHONUTF8")
 
 DEFAULT_WORLD: World = {
     "app_accounts": [],
@@ -306,6 +309,8 @@ def mise(argv: list[str], world: World) -> int:
         world["stage1_installed"] = True
         save(world)
         return 0
+    if argv[:1] == ["install"] and os.environ.get("FAKE_MISE_INSTALL_FAILS"):
+        return int(os.environ["FAKE_MISE_INSTALL_FAILS"])
     if argv[:1] in (["install"], ["exec"]):
         return 0
     return unsupported("mise", argv)
@@ -399,6 +404,13 @@ def wsl(argv: list[str], world: World) -> int:
         save(world)
         return int(state["install_exit"])
     return unsupported("wsl", argv)
+
+
+def winget(argv: list[str], _world: World) -> int:
+    if argv == ["--version"]:
+        print("v1.12.470")
+        return 0
+    return unsupported("winget", argv)
 
 
 def shutdown(argv: list[str], world: World) -> int:
@@ -498,6 +510,7 @@ HANDLERS = {
     "uname": uname,
     "sw_vers": sw_vers,
     "wsl": wsl,
+    "winget": winget,
     "shutdown": shutdown,
     "sc": sc,
     "ssh-add": ssh_add,

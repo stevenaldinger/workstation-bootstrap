@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from starter_support import starter_files
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,9 +17,14 @@ STARTER_FILES = starter_files()
 
 
 def pin(text: str, name: str) -> str:
-    match = re.search(rf'^{name}="([^"]*)"$', text, flags=re.M)
+    """A pinned value from start.sh (`NAME="value"`) or start.ps1 (`$Name = 'value'`)."""
+    match = re.search(rf"""^\$?{name}(?:=| = )["']([^"']*)["']$""", text, flags=re.M)
     assert match, name
     return match.group(1)
+
+
+def read(name: str) -> str:
+    return (REPO_ROOT / name).read_text(encoding="utf-8")
 
 
 def sha256(data: bytes) -> str:
@@ -37,11 +43,20 @@ def test_the_manifest_lists_every_starter_file_with_its_current_checksum() -> No
         assert digest == actual, f"{name} changed: run scripts/pins.sh manifest"
 
 
-def test_start_sh_pins_the_manifest_and_a_commit_that_holds_it() -> None:
-    script = (REPO_ROOT / "start.sh").read_text(encoding="utf-8")
-    commit = pin(script, "FILES_COMMIT")
-    assert re.fullmatch(r"[0-9a-f]{40}", commit), "FILES_COMMIT must be a full commit hash"
-    pinned = pin(script, "MANIFEST_SHA256")
+@pytest.mark.parametrize(
+    ("script", "commit_name", "manifest_name"),
+    [
+        ("start.sh", "FILES_COMMIT", "MANIFEST_SHA256"),
+        ("start.ps1", "FilesCommit", "ManifestSha256"),
+    ],
+)
+def test_each_script_pins_the_manifest_and_a_commit_that_holds_it(
+    script: str, commit_name: str, manifest_name: str
+) -> None:
+    text = read(script)
+    commit = pin(text, commit_name)
+    assert re.fullmatch(r"[0-9a-f]{40}", commit), f"{commit_name} must be a full commit hash"
+    pinned = pin(text, manifest_name)
     assert pinned == sha256((REPO_ROOT / MANIFEST).read_bytes()), "run scripts/pins.sh release"
     shown = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "show", f"{commit}:{MANIFEST}"],
@@ -64,11 +79,20 @@ def test_every_file_at_the_pinned_commit_matches_the_manifest() -> None:
 
 
 def test_the_runtime_pins_match_the_tool_versions_in_mise_toml() -> None:
-    script = (REPO_ROOT / "start.sh").read_text(encoding="utf-8")
-    mise_toml = (REPO_ROOT / "mise.toml").read_text(encoding="utf-8")
-    for tool, name in (("python", "PYTHON_VERSION"), ("uv", "UV_VERSION")):
-        declared = re.search(rf'^{tool}\s*=\s*"([^"]+)"', mise_toml, flags=re.M)
-        assert declared and declared.group(1) == pin(script, name), tool
+    mise_toml = read("mise.toml")
+    for script, names in (
+        ("start.sh", {"python": "PYTHON_VERSION", "uv": "UV_VERSION"}),
+        ("start.ps1", {"python": "PythonVersion", "uv": "UvVersion"}),
+    ):
+        for tool, name in names.items():
+            declared = re.search(rf'^{tool}\s*=\s*"([^"]+)"', mise_toml, flags=re.M)
+            assert declared and declared.group(1) == pin(read(script), name), (script, tool)
+
+
+def test_both_scripts_pin_the_same_mise_and_gh_versions() -> None:
+    sh, ps1 = read("start.sh"), read("start.ps1")
+    assert pin(sh, "MISE_VERSION") == pin(ps1, "MiseVersion")
+    assert pin(sh, "GH_VERSION") == pin(ps1, "GhVersion")
 
 
 def git(root: Path, *args: str) -> str:
@@ -83,7 +107,7 @@ def git(root: Path, *args: str) -> str:
 def test_the_release_script_pins_the_head_commit_and_the_manifest(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     (root / "scripts").mkdir(parents=True)
-    for name in (*STARTER_FILES, "start.sh", "scripts/pins.sh"):
+    for name in (*STARTER_FILES, "start.sh", "start.ps1", "scripts/pins.sh"):
         shutil.copy2(REPO_ROOT / name, root / name)
     git(root, "init", "-q", "-b", "main")
     (root / "start.py").write_text("print('changed')\n", encoding="utf-8")
@@ -100,8 +124,14 @@ def test_the_release_script_pins_the_head_commit_and_the_manifest(tmp_path: Path
     git(root, "commit", "-q", "-m", "manifest")
     subprocess.run([str(script), "release"], check=True, capture_output=True)
     released = (root / "start.sh").read_text(encoding="utf-8")
-    assert pin(released, "FILES_COMMIT") == git(root, "rev-parse", "HEAD").strip()
-    assert pin(released, "MANIFEST_SHA256") == sha256((root / MANIFEST).read_bytes())
+    released_ps1 = (root / "start.ps1").read_text(encoding="utf-8")
+    head = git(root, "rev-parse", "HEAD").strip()
+    manifest_sha = sha256((root / MANIFEST).read_bytes())
+    assert pin(released, "FILES_COMMIT") == head
+    assert pin(released, "MANIFEST_SHA256") == manifest_sha
+    assert pin(released_ps1, "FilesCommit") == head
+    assert pin(released_ps1, "ManifestSha256") == manifest_sha
+    assert released_ps1.count("$FilesCommit =") == 1, "release changes only the two pins"
     assert (root / "start.sh").stat().st_mode & 0o111, "release keeps start.sh executable"
 
     unknown = subprocess.run([str(script), "nonsense"], capture_output=True, text=True, check=False)

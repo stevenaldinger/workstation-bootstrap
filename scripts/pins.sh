@@ -4,24 +4,26 @@ set -euo pipefail
 # =============================================================================
 # Starter pins
 # =============================================================================
-# start.sh pins one checksum: the one of start.sha256, which lists the checksum of every
-# other starter file. A starter change is released in three commits:
+# start.sh and start.ps1 each pin one checksum: the one of start.sha256, which lists the
+# checksum of every other starter file. A starter change is released in three commits:
 #
 #   1. Commit the changed files.
 #   2. scripts/pins.sh manifest   # rewrites start.sha256; commit it
-#   3. scripts/pins.sh release    # sets FILES_COMMIT and MANIFEST_SHA256 in start.sh; commit it
+#   3. scripts/pins.sh release    # sets the commit and manifest pins in both scripts; commit it
 #
-# After the push, `show` prints the commit and start.sh checksum for the bootstrap command.
+# After the push, `show` prints the commit and both scripts' checksums for the bootstrap
+# commands.
 #
 # Usage:
 #   scripts/pins.sh manifest   # Rewrite start.sha256 from the working files
-#   scripts/pins.sh release    # Point start.sh at HEAD and the committed manifest
-#   scripts/pins.sh show       # Print the commit and checksum for the bootstrap command
+#   scripts/pins.sh release    # Point start.sh and start.ps1 at HEAD and the committed manifest
+#   scripts/pins.sh show       # Print the commit and checksums for the bootstrap commands
 # =============================================================================
 
 STARTER_FILES=(start.py start_base.py start_clone.py start_config.py start_identity.py start_packages.py start_windows.py start.toml github_known_hosts stage1.toml stage1-windows.toml)
 MANIFEST="start.sha256"
 SCRIPT="start.sh"
+PS_SCRIPT="start.ps1"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -53,14 +55,21 @@ release() {
     { print }
   ' "${SCRIPT}" > "${temporary}"
   cat "${temporary}" > "${SCRIPT}"
+  awk -v commit="${commit}" -v sha="${manifest_sha}" -v q="'" '
+    /^\$FilesCommit = / { print "$FilesCommit = " q commit q; next }
+    /^\$ManifestSha256 = / { print "$ManifestSha256 = " q sha q; next }
+    { print }
+  ' "${PS_SCRIPT}" > "${temporary}"
+  cat "${temporary}" > "${PS_SCRIPT}"
   rm -f "${temporary}"
-  echo "start.sh now pins ${commit} and manifest ${manifest_sha}; commit it, then run: scripts/pins.sh show"
+  echo "start.sh and start.ps1 now pin ${commit} and manifest ${manifest_sha}; commit them, then run: scripts/pins.sh show"
 }
 
 show() {
   cd "${REPO_ROOT}"
   echo "commit:  $(git rev-parse HEAD)"
-  echo "sha256:  $(git show "HEAD:${SCRIPT}" | shasum -a 256 | cut -d' ' -f1)"
+  echo "start.sh sha256:   $(git show "HEAD:${SCRIPT}" | shasum -a 256 | cut -d' ' -f1)"
+  echo "start.ps1 sha256:  $(git show "HEAD:${PS_SCRIPT}" | shasum -a 256 | cut -d' ' -f1)"
 }
 
 main() {
