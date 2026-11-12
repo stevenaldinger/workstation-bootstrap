@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Stage 1 of the workstation bootstrap: tools, SSH identity, clone, and hand-off.
 
-`start.sh` installs a pinned mise, Python, and uv, then runs this file under that Python.
-Standard library only. Each step checks the machine first and does nothing when its check
-already passes, so a re-run resumes at the first step that is not yet satisfied. Steps that
-need a person (signing in to 1Password, turning on its integrations, approving GitHub) run
-only when their check fails: the walkthrough opens the app or pane, states the action,
-waits for Enter, checks again, and repeats until the check passes.
+`start.sh` installs a pinned mise, then Python, uv, and the GitHub CLI through it, and runs
+this file under that Python. Standard library only. Each step checks the machine first and
+does nothing when its check already passes, so a re-run resumes at the first step that is not
+yet satisfied. Steps that need a person (signing in to 1Password, turning on its integrations,
+approving GitHub) run only when their check fails: the walkthrough opens the app or pane,
+states the action, waits for Enter, checks again, and repeats until the check passes.
 
     python start.py --personal-account <email or sign-in address> [--stage1 stage1.toml]
 

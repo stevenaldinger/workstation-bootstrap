@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,8 @@ WORLD_FILE = FAKE_DIR / "world.json"
 CALLS_FILE = FAKE_DIR / "calls.jsonl"
 GREETING = "Hi stevenaldinger! You've successfully authenticated, but GitHub gives no shell."
 EXIT_UNSUPPORTED = 64
+# Environment variables a call records, so tests can see what a command ran with.
+LOGGED_ENV = ("MISE_YES", "PATH")
 
 DEFAULT_WORLD: World = {
     "app_accounts": [],
@@ -259,6 +263,8 @@ def ssh(argv: list[str], world: World) -> int:
 
 
 def mise(argv: list[str], world: World) -> int:
+    if argv[:1] == ["exec"] and os.environ.get("FAKE_EXEC_SECONDS"):
+        time.sleep(float(os.environ["FAKE_EXEC_SECONDS"]))
     if argv[:3] == ["bootstrap", "packages", "status"]:
         return 0 if world["stage1_installed"] else 1
     if argv[:3] == ["bootstrap", "packages", "apply"]:
@@ -278,11 +284,49 @@ def open_(argv: list[str], _world: World) -> int:
 
 
 def sudo(argv: list[str], _world: World) -> int:
-    return 0 if argv in (["-v"], ["-n", "true"]) else unsupported("sudo", argv)
+    """`sudo -v` and `sudo -n true`; FAKE_SUDO_REFRESH_FAILS makes the refresh fail."""
+    if argv == ["-v"]:
+        return 1 if os.environ.get("FAKE_SUDO_FAILS") else 0
+    if argv == ["-n", "true"]:
+        return 1 if os.environ.get("FAKE_SUDO_REFRESH_FAILS") else 0
+    return unsupported("sudo", argv)
+
+
+# Short options may be combined, as in `-fsSL`.
+SHORT_RUN = re.compile(r"^-[A-Za-z]{2,}$")
+CURL_FLAGS = {
+    "--fail": 0,
+    "--silent": 0,
+    "--show-error": 0,
+    "--location": 0,
+    "--proto": 1,
+    "--proto-redir": 1,
+    "--tlsv1.2": 0,
+    "--connect-timeout": 1,
+    "--max-time": 1,
+    "--retry": 1,
+    "-o": 1,
+    "-f": 0,
+    "-s": 0,
+    "-S": 0,
+    "-L": 0,
+}
 
 
 def curl(argv: list[str], _world: World) -> int:
-    """Serve the file that `downloads.json` maps the URL to; any other URL is a 404."""
+    """Serve the file that `downloads.json` maps the URL to; any other URL is a 404.
+
+    Only the curl options start.sh uses are accepted, as https://curl.se/docs/manpage.html
+    defines them; any other option exits 2 like curl's "unknown option".
+    """
+    words = [
+        flag
+        for word in argv
+        for flag in ([f"-{letter}" for letter in word[1:]] if SHORT_RUN.match(word) else [word])
+    ]
+    bad = unknown_flag(words, CURL_FLAGS, positionals=1)
+    if bad:
+        return fail(f"curl: option {bad}: is unknown", 2)
     downloads = json.loads((FAKE_DIR / "downloads.json").read_text(encoding="utf-8"))
     source = downloads.get(argv[-1])
     if source is None:
@@ -320,7 +364,8 @@ HANDLERS = {
 
 def main(tool: str, argv: list[str]) -> int:
     with CALLS_FILE.open("a", encoding="utf-8") as log:
-        log.write(json.dumps([tool, *argv, {"stdin_null": stdin_is_null()}]) + "\n")
+        seen = {"stdin_null": stdin_is_null(), "env": {k: os.environ.get(k) for k in LOGGED_ENV}}
+        log.write(json.dumps([tool, *argv, seen]) + "\n")
     world = load() if WORLD_FILE.exists() else {}
     if tool not in HANDLERS:
         return unsupported(tool, argv)
