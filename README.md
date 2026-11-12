@@ -81,7 +81,7 @@ How it works:
 Prerequisites:
 
 - An Apple Silicon Mac. A macOS 15 host boots a macOS 26 guest.
-- About 60 GB of free disk for the first image pull, and 15 GB for each run.
+- About 60 GB of free disk for the first image pull, and 15 GB for each run. The base machine's disk is grown to 100 GB (the shipped image leaves too little room to install a full workstation): `Engine.base()` moves the image's recovery partition to the end of the raw disk file while the machine is stopped, then resizes the system container from the host. The disk file is sparse, so this takes no space until the guest writes to it.
 - `uv`, which `mise install` provides.
 
 Everything lives under `~/.cache/workstation-bootstrap` (`--cache-root` changes it), and VM images land in its `tart-home` folder, not in `~/.tart`.

@@ -15,6 +15,7 @@ from support import (
     stage_unpacked_tart,
 )
 
+import prove_engine.engine as engine_module
 from prove_engine import (
     CommandResult,
     Engine,
@@ -54,7 +55,12 @@ def test_ensure_tart_rejects_a_binary_reporting_another_version(
 def test_base_pulls_and_clones_once_then_reuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runner = FakeRunner([("--version", result_of(pins.TART_VERSION + "\n"))])
+    runner = FakeRunner(
+        [
+            ("--version", result_of(pins.TART_VERSION + "\n")),
+            ("get ws-base-26", result_of(json.dumps({"Disk": pins.DISK_GB}))),
+        ]
+    )
     engine = make_engine(tmp_path, runner)
     stage_unpacked_tart(engine, monkeypatch)
     image = select_image(26)
@@ -185,3 +191,35 @@ def test_unpack_tart_does_not_write_outside_the_release_folder(tmp_path: Path) -
     with pytest.raises(tarfile.FilterError):
         toolchain.unpack_tart(archive, release)
     assert not (tmp_path / "escaped.txt").exists()
+
+
+def test_ensure_disk_grows_a_base_that_has_the_shipped_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    grown: list[Path] = []
+
+    def move_recovery(image: Path) -> bool:
+        grown.append(image)
+        return True
+
+    def resize_container(image: Path, *_: object) -> None:
+        grown.append(image)
+
+    monkeypatch.setattr(engine_module, "grow_layout", move_recovery)
+    monkeypatch.setattr(engine_module, "grow_system_container", resize_container)
+    runner = FakeRunner([("get ws-base-26", result_of(json.dumps({"Disk": 50})))])
+    engine = make_engine(tmp_path, runner)
+    engine.ensure_disk("ws-base-26")
+    assert f"set ws-base-26 --disk-size {pins.DISK_GB}" in runner.tart_calls()
+    expected = engine.tart_home / "vms" / "ws-base-26" / "disk.img"
+    assert grown == [expected, expected]
+
+
+def test_ensure_disk_leaves_a_grown_base_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine_module, "grow_layout", lambda image: pytest.fail("moved"))
+    runner = FakeRunner([("get ws-base-26", result_of(json.dumps({"Disk": pins.DISK_GB})))])
+    engine = make_engine(tmp_path, runner)
+    engine.ensure_disk("ws-base-26")
+    assert not [c for c in runner.tart_calls() if c.startswith("set")]

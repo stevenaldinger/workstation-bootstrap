@@ -18,6 +18,8 @@ RUN_PREFIX = "wsrun-"
 SCENARIO_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 SHARE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$")
 
+# The image ships a 50 GB disk with about 18 GB free; a full bootstrap needs far more.
+DISK_GB = 100
 # The first pull needs the compressed image plus its expanded copy.
 FREE_GB_FIRST_PULL = 60
 FREE_GB_PER_RUN = 15

@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from prove_engine.disk import grow_layout, grow_system_container
 from prove_engine.logic import (
     check_free_space,
     check_host,
@@ -27,6 +28,7 @@ from prove_engine.model import Base, CommandResult, HostInfo, ProofError, Runner
 from prove_engine.pins import (
     BASE_PREFIX,
     DEFAULT_COMMAND,
+    DISK_GB,
     FREE_GB_FIRST_PULL,
     FREE_GB_PER_RUN,
     RUN_PREFIX,
@@ -94,7 +96,18 @@ class Engine:
             check_free_space(shutil.disk_usage(self.tart_home).free, FREE_GB_FIRST_PULL)
             self.checked("pull", image.ref)
             self.checked("clone", image.ref, name)
+        self.ensure_disk(name)
         return Base(image, name)
+
+    def ensure_disk(self, name: str) -> None:
+        """Give the never-booted base a DISK_GB disk whose system container uses all of it."""
+        info = json.loads(self.checked("get", name, "--format", "json").stdout)
+        if int(info["Disk"]) >= DISK_GB:
+            return
+        self.checked("set", name, "--disk-size", str(DISK_GB))
+        image = self.tart_home / "vms" / name / "disk.img"
+        grow_layout(image)
+        grow_system_container(image, self.runner, self.env)
 
     @contextmanager
     def machine(self, scenario: str, base: Base) -> Iterator[Machine]:
