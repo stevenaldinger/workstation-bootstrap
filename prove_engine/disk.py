@@ -6,6 +6,10 @@ container across it (SIP forbids moving the recovery partition from inside the g
 module moves the recovery partition to the end of the raw disk file, while the machine is
 stopped, and rewrites both copies of the GUID partition table. The guest then grows its
 container into the freed space with `diskutil apfs resizeContainer`.
+
+Every step is safe to repeat and `disk_is_grown` reads the result from the partition table, so
+a run that stopped half way, after `tart set` but before the container was resized, is finished
+by the next one.
 """
 
 from __future__ import annotations
@@ -29,6 +33,11 @@ ALIGN_SECTORS = 8
 COPY_CHUNK = 8 * 1024 * 1024
 RECOVERY_TYPE = uuid.UUID("52637672-7900-11AA-AA11-00306543ECAC")
 CONTAINER_TYPE = uuid.UUID("7C3457EF-0000-11AA-AA11-00306543ECAC")
+# A resized container ends a little before the recovery partition (APFS aligns it), while an
+# unresized one leaves the whole added space between them. The container counts as grown when
+# that gap is under a sixteenth of its size.
+CONTAINER_GAP_RATIO = 16
+FIRST_USABLE = 34
 
 
 @dataclass
@@ -107,22 +116,33 @@ def write_table(image: Path, table: Table, total_sectors: int) -> None:
     last_usable = total_sectors - 2 - entry_sectors
     backup_entries_lba = last_usable + 1
     primary = build_header(
-        table, current=1, backup=total_sectors - 1, first_usable=34, last_usable=last_usable,
+        table,
+        current=1,
+        backup=total_sectors - 1,
+        first_usable=FIRST_USABLE,
+        last_usable=last_usable,
         entries_lba=2,
-    )  # fmt: skip
+    )
     backup = build_header(
-        table, current=total_sectors - 1, backup=1, first_usable=34, last_usable=last_usable,
+        table,
+        current=total_sectors - 1,
+        backup=1,
+        first_usable=FIRST_USABLE,
+        last_usable=last_usable,
         entries_lba=backup_entries_lba,
-    )  # fmt: skip
+    )
+    padded = entries.ljust(entry_sectors * SECTOR, b"\0")
+    # The primary header comes last: until it is written, the old header still describes a disk
+    # whose data is intact, and the next run repeats the move.
     with image.open("r+b") as handle:
-        handle.seek(SECTOR)
-        handle.write(primary.ljust(SECTOR, b"\0"))
-        handle.seek(2 * SECTOR)
-        handle.write(entries.ljust(entry_sectors * SECTOR, b"\0"))
         handle.seek(backup_entries_lba * SECTOR)
-        handle.write(entries.ljust(entry_sectors * SECTOR, b"\0"))
+        handle.write(padded)
         handle.seek((total_sectors - 1) * SECTOR)
         handle.write(backup.ljust(SECTOR, b"\0"))
+        handle.seek(2 * SECTOR)
+        handle.write(padded)
+        handle.seek(SECTOR)
+        handle.write(primary.ljust(SECTOR, b"\0"))
 
 
 def copy_sectors(image: Path, source: int, destination: int, count: int) -> None:
@@ -155,10 +175,49 @@ def usable_end(image: Path, table: Table) -> int:
     return image.stat().st_size // SECTOR - 2 - entry_sectors
 
 
+def check_table(table: Table, last_usable: int) -> None:
+    """Refuse partitions that are out of range, overlap, or put recovery anywhere but last."""
+    parts = sorted((p for p in table.partitions if p), key=lambda p: p.first)
+    for part in parts:
+        if part.first < FIRST_USABLE or part.last < part.first or part.last > last_usable:
+            raise ProofError(
+                f"partition at sectors {part.first}-{part.last} lies outside the disk's "
+                f"usable range {FIRST_USABLE}-{last_usable}"
+            )
+    for before, after in zip(parts, parts[1:], strict=False):
+        if after.first <= before.last:
+            raise ProofError(
+                f"partitions at sectors {before.first}-{before.last} and "
+                f"{after.first}-{after.last} overlap"
+            )
+    if parts and uuid.UUID(bytes_le=parts[-1].type_guid) != RECOVERY_TYPE:
+        raise ProofError("the recovery partition is not the last partition on the disk")
+
+
+def system_container(table: Table) -> Partition:
+    """The APFS container nearest the end of the disk, which the resize grows."""
+    containers = [
+        p for p in table.partitions if p and uuid.UUID(bytes_le=p.type_guid) == CONTAINER_TYPE
+    ]
+    if not containers:
+        raise ProofError("expected an APFS container partition")
+    return max(containers, key=lambda p: p.last)
+
+
 def recovery_at_end(image: Path) -> bool:
     """Whether the recovery partition already ends within one alignment unit of the disk end."""
     table = read_table(image)
     return usable_end(image, table) - find_recovery(table).last < ALIGN_SECTORS
+
+
+def disk_is_grown(image: Path) -> bool:
+    """Whether the recovery partition is at the end and the container fills the space before it."""
+    table = read_table(image)
+    recovery = find_recovery(table)
+    at_end = usable_end(image, table) - recovery.last < ALIGN_SECTORS
+    container = system_container(table)
+    gap = recovery.first - 1 - container.last
+    return at_end and gap * CONTAINER_GAP_RATIO < container.sectors
 
 
 def grow_layout(image: Path) -> bool:
@@ -174,6 +233,7 @@ def grow_layout(image: Path) -> bool:
     gap = last_usable - part.last
     if gap < 0:
         raise ProofError("the disk file is smaller than its partition table")
+    check_table(table, last_usable)
     if gap < ALIGN_SECTORS:
         write_table(image, table, total_sectors)
         return False
@@ -204,23 +264,48 @@ def parse_attached(output: str) -> tuple[str, str]:
     return whole, container
 
 
+def first_device(output: str) -> str:
+    """The first /dev node `hdiutil attach` printed, which is the whole attached disk."""
+    for line in output.splitlines():
+        fields = line.split()
+        if fields and fields[0].startswith("/dev/disk"):
+            return fields[0]
+    return ""
+
+
+def detach(runner: Runner, node: str, env: Mapping[str, str]) -> str:
+    """Detach an attached disk; return the failure message, or an empty string."""
+    result = runner(["hdiutil", "detach", node, "-force"], env=env, timeout=120)
+    if result.exit_code == 0:
+        return ""
+    return f"hdiutil detach {node} failed: {(result.stderr or result.stdout).strip()}"
+
+
 def grow_system_container(image: Path, runner: Runner, env: Mapping[str, str]) -> None:
     """Grow the system APFS container into the space behind the (moved) recovery partition.
 
     The raw disk file is attached to the host without mounting anything, resized with the
-    host's `diskutil`, and detached again, so the guest sees one large system container.
+    host's `diskutil`, and detached again, so the guest sees one large system container. The
+    image is detached on every path, including when its listing cannot be read, and a detach that
+    fails is reported because an attached image cannot be cloned safely.
     """
     attach = ["hdiutil", "attach", "-nomount", "-imagekey", "diskimage-class=CRawDiskImage"]
     attached = runner([*attach, str(image)], env=env, timeout=120)
     if attached.exit_code != 0:
         raise ProofError(f"hdiutil attach failed: {attached.stderr.strip()}")
-    whole, container = parse_attached(attached.stdout)
+    node = first_device(attached.stdout)
     try:
+        _, container = parse_attached(attached.stdout)
         resized = runner(
             ["diskutil", "apfs", "resizeContainer", container, "0"], env=env, timeout=600
         )
         if resized.exit_code != 0:
             detail = (resized.stderr or resized.stdout).strip()
             raise ProofError(f"resizing the system container failed: {detail}")
-    finally:
-        runner(["hdiutil", "detach", whole, "-force"], env=env, timeout=120)
+    except BaseException:
+        if node:
+            detach(runner, node, env)
+        raise
+    failure = detach(runner, node, env) if node else "hdiutil attach printed no disk node"
+    if failure:
+        raise ProofError(failure)

@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import struct
-import uuid
 import zlib
 from pathlib import Path
 
 import pytest
+from disk_support import (
+    CONTAINER,
+    NEW_SECTORS,
+    RECOVERY,
+    make_disk,
+    make_partition,
+    resize_container,
+    write_layout,
+)
 from support import FakeRunner, result_of
 
 from prove_engine import ProofError
@@ -19,8 +27,8 @@ from prove_engine.disk import (
     RECOVERY_TYPE,
     SECTOR,
     SIGNATURE,
-    Partition,
-    Table,
+    copy_sectors,
+    disk_is_grown,
     grow_layout,
     grow_system_container,
     parse_attached,
@@ -28,41 +36,6 @@ from prove_engine.disk import (
     recovery_at_end,
     write_table,
 )
-
-OLD_SECTORS = 4096
-NEW_SECTORS = 16384
-CONTAINER = (40, 2039)
-RECOVERY = (2040, 4023)
-
-
-def make_partition(kind: uuid.UUID, first: int, last: int, name: str) -> Partition:
-    return Partition(
-        kind.bytes_le,
-        uuid.uuid4().bytes_le,
-        first,
-        last,
-        0,
-        name.encode("utf-16-le").ljust(72, b"\0"),
-    )
-
-
-def make_disk(path: Path, *, recovery_marker: bytes = b"RECOVERY-DATA") -> Path:
-    """A raw disk file with a container and a recovery partition, grown after the layout."""
-    partitions: list[Partition | None] = [
-        make_partition(CONTAINER_TYPE, *CONTAINER, "container"),
-        make_partition(RECOVERY_TYPE, *RECOVERY, "recovery"),
-    ]
-    partitions += [None] * 126
-    table = Table(uuid.uuid4().bytes_le, 128, partitions)
-    path.write_bytes(bytes(OLD_SECTORS * SECTOR))
-    write_table(path, table, OLD_SECTORS)
-    with path.open("r+b") as handle:
-        handle.seek(RECOVERY[0] * SECTOR)
-        handle.write(recovery_marker)
-        handle.seek(RECOVERY[1] * SECTOR)
-        handle.write(b"LAST-SECTOR")
-        handle.truncate(NEW_SECTORS * SECTOR)
-    return path
 
 
 def header_fields(path: Path, lba: int) -> tuple[object, ...]:
@@ -200,3 +173,100 @@ def test_a_failed_attach_stops_before_any_resize(tmp_path: Path) -> None:
     with pytest.raises(ProofError, match="resource busy"):
         grow_system_container(tmp_path / "disk.img", runner, {})
     assert [call[0] for call in runner.calls] == ["hdiutil"]
+
+
+# --- Grown-state detection -----------------------------------------------------------
+
+
+def test_a_disk_is_grown_only_after_both_the_move_and_the_container_resize(tmp_path: Path) -> None:
+    disk = make_disk(tmp_path / "disk.img")
+    assert disk_is_grown(disk) is False
+    grow_layout(disk)
+    assert disk_is_grown(disk) is False
+    resize_container(disk)
+    assert disk_is_grown(disk) is True
+
+
+def test_a_resize_that_stopped_between_the_copy_and_the_table_write_is_repeated(
+    tmp_path: Path,
+) -> None:
+    disk = make_disk(tmp_path / "disk.img")
+    reference = make_disk(tmp_path / "reference.img")
+    grow_layout(reference)
+    expected = read_table(reference)
+    # The copy finished and the table was not written.
+    moved = next(p for p in expected.partitions if p and p.type_guid == RECOVERY_TYPE.bytes_le)
+    copy_sectors(disk, RECOVERY[0], moved.first, moved.sectors)
+    assert grow_layout(disk) is True
+    recovery = next(
+        p for p in read_table(disk).partitions if p and p.type_guid == RECOVERY_TYPE.bytes_le
+    )
+    assert recovery.first == moved.first
+    assert disk.read_bytes()[recovery.first * SECTOR :][:13] == b"RECOVERY-DATA"
+
+
+def test_overlapping_partitions_are_refused_before_anything_moves(tmp_path: Path) -> None:
+    disk = tmp_path / "disk.img"
+    write_layout(
+        disk,
+        [
+            make_partition(CONTAINER_TYPE, 40, 2100, "container"),
+            make_partition(RECOVERY_TYPE, 2040, 4023, "recovery"),
+        ],
+        NEW_SECTORS,
+    )
+    before = disk.read_bytes()
+    with pytest.raises(ProofError, match="overlap"):
+        grow_layout(disk)
+    assert disk.read_bytes() == before
+
+
+def test_a_partition_inside_the_table_area_is_refused(tmp_path: Path) -> None:
+    disk = tmp_path / "disk.img"
+    write_layout(
+        disk,
+        [
+            make_partition(CONTAINER_TYPE, 10, 2039, "container"),
+            make_partition(RECOVERY_TYPE, 2040, 4023, "recovery"),
+        ],
+        NEW_SECTORS,
+    )
+    with pytest.raises(ProofError, match="outside the disk's usable range"):
+        grow_layout(disk)
+
+
+def test_a_recovery_partition_that_is_not_last_is_refused(tmp_path: Path) -> None:
+    disk = tmp_path / "disk.img"
+    write_layout(
+        disk,
+        [
+            make_partition(RECOVERY_TYPE, 40, 2039, "recovery"),
+            make_partition(CONTAINER_TYPE, 2040, 4023, "container"),
+        ],
+        NEW_SECTORS,
+    )
+    with pytest.raises(ProofError, match="not the last partition"):
+        grow_layout(disk)
+
+
+def test_a_disk_without_an_apfs_container_is_refused(tmp_path: Path) -> None:
+    disk = tmp_path / "disk.img"
+    write_layout(disk, [make_partition(RECOVERY_TYPE, 40, 2039, "recovery")], NEW_SECTORS)
+    with pytest.raises(ProofError, match="APFS container"):
+        disk_is_grown(disk)
+
+
+def test_an_unreadable_listing_still_detaches_the_attached_image(tmp_path: Path) -> None:
+    runner = FakeRunner([("hdiutil attach", result_of("/dev/disk4 \tGUID_partition_scheme\n"))])
+    with pytest.raises(ProofError, match="cannot read the attached disk layout"):
+        grow_system_container(tmp_path / "disk.img", runner, {})
+    assert runner.calls[-1][:3] == ("hdiutil", "detach", "/dev/disk4")
+    assert not [call for call in runner.calls if call[0] == "diskutil"]
+
+
+def test_a_detach_that_fails_after_a_good_resize_is_an_error(tmp_path: Path) -> None:
+    runner = FakeRunner(
+        [("hdiutil attach", result_of(ATTACHED)), ("hdiutil detach", result_of("", 1, "busy"))]
+    )
+    with pytest.raises(ProofError, match="detach /dev/disk4 failed: busy"):
+        grow_system_container(tmp_path / "disk.img", runner, {})

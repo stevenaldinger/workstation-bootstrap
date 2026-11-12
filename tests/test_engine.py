@@ -8,6 +8,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
+from disk_support import make_disk, resize_container, stage_grown_base
 from support import (
     FakeRunner,
     make_engine,
@@ -26,6 +27,7 @@ from prove_engine import (
     toolchain,
     write_evidence,
 )
+from prove_engine.disk import disk_is_grown, grow_layout
 from prove_engine.model import Base, RunResult
 
 
@@ -63,6 +65,7 @@ def test_base_pulls_and_clones_once_then_reuses(
     )
     engine = make_engine(tmp_path, runner)
     stage_unpacked_tart(engine, monkeypatch)
+    stage_grown_base(engine.tart_home / "vms" / "ws-base-26" / "disk.img")
     image = select_image(26)
     first = engine.base(26)
     assert first.name == "ws-base-26"
@@ -217,33 +220,80 @@ def test_unpack_tart_does_not_write_outside_the_release_folder(tmp_path: Path) -
     assert not (tmp_path / "escaped.txt").exists()
 
 
+# --- Growing the base disk ----------------------------------------------------------
+
+
+class DiskHarness:
+    """A synthetic base disk, with the host-only container resize replaced by its table effect."""
+
+    def __init__(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recorded_gb: int, *, stage: str
+    ) -> None:
+        self.runner = FakeRunner([("get ws-base-26", result_of(json.dumps({"Disk": recorded_gb})))])
+        self.engine = make_engine(tmp_path, self.runner)
+        self.image = self.engine.tart_home / "vms" / "ws-base-26" / "disk.img"
+        self.image.parent.mkdir(parents=True)
+        make_disk(self.image)
+        if stage in {"moved", "grown"}:
+            grow_layout(self.image)
+        if stage == "grown":
+            resize_container(self.image)
+        self.resizes = 0
+        monkeypatch.setattr(engine_module, "grow_system_container", self.resize)
+
+    def resize(self, image: Path, *_: object) -> None:
+        self.resizes += 1
+        resize_container(image)
+
+    def sets(self) -> list[str]:
+        return [c for c in self.runner.tart_calls() if c.startswith("set")]
+
+
 def test_ensure_disk_grows_a_base_that_has_the_shipped_size(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    grown: list[Path] = []
+    harness = DiskHarness(tmp_path, monkeypatch, 50, stage="shipped")
+    harness.engine.ensure_disk("ws-base-26")
+    assert harness.sets() == [f"set ws-base-26 --disk-size {pins.DISK_GB}"]
+    assert harness.resizes == 1
+    assert disk_is_grown(harness.image)
 
-    def move_recovery(image: Path) -> bool:
-        grown.append(image)
-        return True
 
-    def resize_container(image: Path, *_: object) -> None:
-        grown.append(image)
+def test_ensure_disk_finishes_a_grow_that_stopped_before_the_layout_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = DiskHarness(tmp_path, monkeypatch, pins.DISK_GB, stage="shipped")
+    harness.engine.ensure_disk("ws-base-26")
+    assert harness.sets() == []
+    assert harness.resizes == 1
+    assert disk_is_grown(harness.image)
 
-    monkeypatch.setattr(engine_module, "grow_layout", move_recovery)
-    monkeypatch.setattr(engine_module, "grow_system_container", resize_container)
-    runner = FakeRunner([("get ws-base-26", result_of(json.dumps({"Disk": 50})))])
-    engine = make_engine(tmp_path, runner)
-    engine.ensure_disk("ws-base-26")
-    assert f"set ws-base-26 --disk-size {pins.DISK_GB}" in runner.tart_calls()
-    expected = engine.tart_home / "vms" / "ws-base-26" / "disk.img"
-    assert grown == [expected, expected]
+
+def test_ensure_disk_finishes_a_grow_that_stopped_before_the_container_resize(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = DiskHarness(tmp_path, monkeypatch, pins.DISK_GB, stage="moved")
+    harness.engine.ensure_disk("ws-base-26")
+    assert harness.sets() == []
+    assert harness.resizes == 1
+    assert disk_is_grown(harness.image)
 
 
 def test_ensure_disk_leaves_a_grown_base_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(engine_module, "grow_layout", lambda image: pytest.fail("moved"))
-    runner = FakeRunner([("get ws-base-26", result_of(json.dumps({"Disk": pins.DISK_GB})))])
-    engine = make_engine(tmp_path, runner)
-    engine.ensure_disk("ws-base-26")
-    assert not [c for c in runner.tart_calls() if c.startswith("set")]
+    harness = DiskHarness(tmp_path, monkeypatch, pins.DISK_GB, stage="grown")
+    before = harness.image.read_bytes()
+    harness.engine.ensure_disk("ws-base-26")
+    assert harness.sets() == []
+    assert harness.resizes == 0
+    assert harness.image.read_bytes() == before
+
+
+def test_ensure_disk_fails_when_the_resize_leaves_the_container_small(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = DiskHarness(tmp_path, monkeypatch, 50, stage="shipped")
+    monkeypatch.setattr(engine_module, "grow_system_container", lambda *_: None)
+    with pytest.raises(ProofError, match="still not grown"):
+        harness.engine.ensure_disk("ws-base-26")

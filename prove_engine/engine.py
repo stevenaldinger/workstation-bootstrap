@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from prove_engine.cache import check_purgeable, claim_root, purge_root
-from prove_engine.disk import grow_layout, grow_system_container
+from prove_engine.disk import disk_is_grown, grow_layout, grow_system_container
 from prove_engine.lock import HostLock, clear_if_stale, held_message, pid_alive, read_owner
 from prove_engine.logic import (
     check_free_space,
@@ -118,14 +118,22 @@ class Engine:
         return Base(image, name)
 
     def ensure_disk(self, name: str) -> None:
-        """Give the never-booted base a DISK_GB disk whose system container uses all of it."""
-        info = json.loads(self.checked("get", name, "--format", "json").stdout)
-        if int(info["Disk"]) >= DISK_GB:
-            return
-        self.checked("set", name, "--disk-size", str(DISK_GB))
+        """Give the never-booted base a DISK_GB disk whose system container uses all of it.
+
+        The state is read from the disk's partition table, not from the size Tart recorded, so a
+        grow that stopped half way (the size set, the container not yet resized) is finished by
+        the next call.
+        """
         image = self.tart_home / "vms" / name / "disk.img"
+        info = json.loads(self.checked("get", name, "--format", "json").stdout)
+        if int(info["Disk"]) < DISK_GB:
+            self.checked("set", name, "--disk-size", str(DISK_GB))
+        if disk_is_grown(image):
+            return
         grow_layout(image)
         grow_system_container(image, self.runner, self.env)
+        if not disk_is_grown(image):
+            raise ProofError(f"the disk of {name} is still not grown after resizing its container")
 
     @contextmanager
     def machine(self, scenario: str, base: Base) -> Iterator[Machine]:
