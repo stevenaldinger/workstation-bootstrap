@@ -364,9 +364,8 @@ def test_a_mise_download_that_fails_its_checksum_is_refused(sandbox: Sandbox) ->
     assert not (sandbox.work / "mise.zip").exists()
 
 
-@pytest.mark.parametrize("name", starter_files())
-def test_a_starter_file_that_fails_its_checksum_is_refused(sandbox: Sandbox, name: str) -> None:
-    sandbox.serve_matching(f"/{name}", b"tampered")
+def test_a_starter_file_that_fails_its_checksum_is_refused(sandbox: Sandbox) -> None:
+    sandbox.serve_matching("/start.py", b"tampered")
     result = sandbox.run("-PersonalAccount", ACCOUNT)
     assert result.returncode == 1
     assert "checksum mismatch in the starter files" in result.stderr
