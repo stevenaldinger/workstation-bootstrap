@@ -28,6 +28,7 @@ Claude Code reads this file at the start of every session, and it needs Claude C
 | `scripts/check.sh` | Every check: shellcheck, ruff, mypy, pytest, gitleaks, commit messages, and agent files |
 | `scripts/pins.sh` | Writes the manifest, points `start.sh` at it, and prints the pin |
 | `tests/` | The pytest suite |
+| `.claude/agents/`, `.claude/settings.json` | The `starter-maintainer` agent and the setting that makes it the default |
 | `.claude/skills/` | The skill listed below |
 
 ## Commands

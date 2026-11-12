@@ -195,4 +195,4 @@ git config core.hooksPath .githooks
 
 ## Agent instructions
 
-Claude Code reads `AGENTS.md` and the `change-starter` skill under `.claude/skills/`; there is no `CLAUDE.md`, and no skill is a symlink, because either one breaks how Claude Code loads them. The skill covers the checks above, the release flow, and reporting the new pin.
+Claude Code reads `AGENTS.md`, runs sessions as the `starter-maintainer` agent in `.claude/agents/` (the `agent` key in `.claude/settings.json` makes it the default), and loads the `change-starter` skill under `.claude/skills/`; there is no `CLAUDE.md`, and no agent or skill is a symlink, because either one breaks how Claude Code loads them. `scripts/check.sh agent-files` fails when the default agent names a file that is missing or a symlink. The skill covers the checks above, the release flow, and reporting the new pin.
