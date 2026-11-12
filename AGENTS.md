@@ -1,8 +1,6 @@
 # AGENTS.md
 
-instructions-marker: ws-agents-4bc9642a
-
-Claude Code reads this file at the start of every session, and it needs Claude Code 2.1.281 or later. Claude Code skips `AGENTS.md` when a `CLAUDE.md` exists, so this repository holds none. Skills are real files under `.claude/skills/`, never symlinks. The private setup repository's `ws check --online` verifies both against the commit its README pins.
+Claude Code reads this file at the start of every session, and it needs Claude Code 2.1.281 or later. Claude Code skips `AGENTS.md` when a `CLAUDE.md` exists, so this repository holds none. Skills are real files under `.claude/skills/`, never symlinks.
 
 ## What this is
 
@@ -10,22 +8,25 @@ Claude Code reads this file at the start of every session, and it needs Claude C
 
 ## Invariants
 
-- The starter holds scripts only. No account identifier, email address, package list, token, or other private value is ever committed; the one personal value it needs is passed as the `--personal-account` argument.
+- The starter holds no account identifier, email address, token, or other private value; the one personal value it needs is passed as the `--personal-account` argument. Its own stage-1 package list is `stage1.toml`, and its settings are `start.toml`.
 - `start.sh` needs only the `/bin/bash` 3.2 that every Mac has. `start.py` and the proof engine use only the Python standard library.
-- The starter cannot change without its pin changing: `start.sh` pins the checksum of `start.sha256`, which lists the checksum of every other starter file, and the private repository's README pins the commit and checksum of `start.sh`.
-- Every Python module stays under 500 lines, and the tests never reach a real Homebrew, 1Password, or GitHub.
+- The starter cannot change without its pin changing: `start.sh` pins the checksum of `start.sha256`, which lists the checksum of every other starter file, and the bootstrap command pins the commit and checksum of `start.sh`.
+- Nothing trusts a host key on first use: ssh runs with `StrictHostKeyChecking=yes` and the keys in `github_known_hosts`.
+- The tests never reach a real Homebrew, 1Password, or GitHub; they run the starter against fake commands.
+- Every commit message is a Conventional Commit with a body (see the README).
 
 ## Layout
 
 | Path | Holds |
 |------|-------|
-| `start.sh` | The only Bash: checks the Mac and installs mise, then runs `start.py` |
-| `start.py` | The staged walkthrough, with `start_base.py` and `start_identity.py` |
-| `stage1.toml` | The packages stage 1 installs |
+| `start.sh` | The only Bash: checks the Mac, installs mise, Python, uv, and gh, then runs `start.py` |
+| `start.py` | The entrypoint, with the sibling modules `start_base.py`, `start_config.py`, `start_packages.py`, `start_identity.py`, and `start_clone.py` |
+| `start.toml`, `stage1.toml` | The starter's settings and its stage-1 package list |
+| `github_known_hosts` | GitHub's pinned SSH host keys |
 | `start.sha256` | The checksum of each file `start.sh` downloads |
 | `prove.py` | The proof engine's command line, with the `prove_engine/` package |
-| `scripts/check.sh` | Every check: shellcheck, ruff, mypy, pytest, and gitleaks |
-| `scripts/pins.sh` | Writes the manifest, points `start.sh` at it, and prints the README pin |
+| `scripts/check.sh` | Every check: shellcheck, ruff, mypy, pytest, gitleaks, commit messages, and agent files |
+| `scripts/pins.sh` | Writes the manifest, points `start.sh` at it, and prints the pin |
 | `tests/` | The pytest suite |
 | `.claude/skills/` | The skill listed below |
 
@@ -48,7 +49,7 @@ Ask the owner in the session before pushing to a remote, and before running `sta
 
 ## Releasing a starter change
 
-A change to `start.py`, `start_base.py`, `start_identity.py`, or `stage1.toml` is released in three commits with `scripts/pins.sh`: commit the change, run `scripts/pins.sh manifest` and commit `start.sha256`, run `scripts/pins.sh release` and commit `start.sh`. After the push, `scripts/pins.sh show` prints the commit and checksum that the private repository's README pins; the private repository's `release-starter` skill moves that pin. The `change-starter` skill below runs this flow.
+A change to any file in `STARTER_FILES` in `scripts/pins.sh` is released in three commits: commit the change, run `scripts/pins.sh manifest` and commit `start.sha256` as `build(manifest): refresh starter manifest`, then run `scripts/pins.sh release` and commit `start.sh` as `chore(release): pin starter files`. After the push, `scripts/pins.sh show` prints the commit and checksum for the bootstrap command. The `change-starter` skill below runs this flow.
 
 ## Skills
 
@@ -56,4 +57,4 @@ Each skill is a real file at `.claude/skills/<name>/SKILL.md` with four sections
 
 | Skill | Use it to |
 |-------|-----------|
-| `change-starter` | Change the starter or its proof engine, run the checks, and hand the new pin to the private repository |
+| `change-starter` | Change the starter or its proof engine, run the checks, and report the new pin |

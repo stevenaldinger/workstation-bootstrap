@@ -11,13 +11,12 @@ set -euo pipefail
 #   2. scripts/pins.sh manifest   # rewrites start.sha256; commit it
 #   3. scripts/pins.sh release    # sets FILES_COMMIT and MANIFEST_SHA256 in start.sh; commit it
 #
-# `release` prints the commit and start.sh checksum that the private repository's README
-# pins, once the release commit is the one that is pushed.
+# After the push, `show` prints the commit and start.sh checksum for the bootstrap command.
 #
 # Usage:
 #   scripts/pins.sh manifest   # Rewrite start.sha256 from the working files
 #   scripts/pins.sh release    # Point start.sh at HEAD and the committed manifest
-#   scripts/pins.sh show       # Print the commit and checksum a README would pin
+#   scripts/pins.sh show       # Print the commit and checksum for the bootstrap command
 # =============================================================================
 
 STARTER_FILES=(start.py start_base.py start_clone.py start_config.py start_identity.py start_packages.py start.toml github_known_hosts stage1.toml)
