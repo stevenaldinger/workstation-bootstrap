@@ -216,8 +216,8 @@ class Engine:
             write_evidence(out_dir, outcome)
         return outcome
 
-    def reap(self) -> list[str]:
-        """Delete run clones left behind by a crashed controller."""
+    def _reap(self) -> list[str]:
+        """Delete every run clone, a live run's included; reach it only through `cleanup`."""
         stale = [name for name in self.local_vms() if name.startswith(RUN_PREFIX)]
         for name in stale:
             self.tart_cmd("stop", name, "--timeout", "5", timeout=60)
@@ -235,7 +235,7 @@ class Engine:
         owner = read_owner(self.vm_lock)
         if self.vm_lock.exists() and (owner is None or (pid_alive(owner.pid) and not owner.kept)):
             raise ProofError(held_message(self.vm_lock, owner))
-        reaped = self.reap() if self.tart.exists() else []
+        reaped = self._reap() if self.tart.exists() else []
         clear_if_stale(self.vm_lock)
         if purge:
             purge_root(self.cache_root, home)

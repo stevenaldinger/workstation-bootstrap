@@ -150,11 +150,13 @@ def test_machine_keeps_its_clone_when_asked(
     assert "ssh admin@192.168.64.7" in capsys.readouterr().out
 
 
-def test_reap_deletes_only_run_clones(tmp_path: Path) -> None:
+def test_cleanup_deletes_only_run_clones(tmp_path: Path) -> None:
     listing = "ws-base-26\nwsrun-first-run-1\nwsrun-preview-2\nsomething-else\n"
     runner = FakeRunner([("list", result_of(listing))])
     engine = make_engine(tmp_path, runner)
-    assert engine.reap() == ["wsrun-first-run-1", "wsrun-preview-2"]
+    engine.tart.parent.mkdir(parents=True)
+    engine.tart.write_text("", encoding="utf-8")
+    assert engine.cleanup() == ["wsrun-first-run-1", "wsrun-preview-2"]
     deleted = [c for c in runner.tart_calls() if c.startswith("delete")]
     assert deleted == ["delete wsrun-first-run-1", "delete wsrun-preview-2"]
 
