@@ -11,8 +11,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
-from prove_engine.logic import guest_endpoint, scp_argv, ssh_argv, tart_run_argv
-from prove_engine.model import Base, CommandResult, ProofError, Share
+from prove_engine.logic import (
+    guest_endpoint,
+    parse_vnc_address,
+    scp_argv,
+    ssh_argv,
+    tart_run_argv,
+)
+from prove_engine.model import Base, CommandResult, ProofError, Share, VncAddress
 from prove_engine.pins import (
     BASE_PREFIX,
     GUEST_PASSWORD,
@@ -20,6 +26,7 @@ from prove_engine.pins import (
     IP_WAIT_SECONDS,
     SSH_READY_SECONDS,
     STOP_SECONDS,
+    VNC_WAIT_SECONDS,
 )
 
 if TYPE_CHECKING:
@@ -36,6 +43,8 @@ class Machine:
         self.keep = False
         self.shares: tuple[Share, ...] = ()
         self.ip: str | None = None
+        # Whether the machine serves its screen over VNC; kept so a snapshot boots the same way.
+        self.vnc = False
         self._proc: subprocess.Popen[bytes] | None = None
         self._log: IO[bytes] | None = None
 
@@ -43,17 +52,18 @@ class Machine:
     def log_path(self) -> Path:
         return self.engine.logs / f"{self.name}.log"
 
-    def start(self, shares: Sequence[Share] = ()) -> dict[str, float]:
-        """Boot headless and wait for an IP address; return the timings."""
+    def start(self, shares: Sequence[Share] = (), *, vnc: bool = False) -> dict[str, float]:
+        """Boot headless (serving the screen over VNC when asked) and wait for an IP address."""
         if self.name.startswith(BASE_PREFIX):
             raise ProofError("the base machine is never booted")
         self.shares = tuple(shares)
+        self.vnc = vnc
         for share in self.shares:
             if not share.path.is_dir():
                 raise ProofError(f"share {share.name!r} is not a directory: {share.path}")
         self.engine.logs.mkdir(parents=True, exist_ok=True)
         self._log = self.log_path.open("wb")
-        argv = tart_run_argv(self.engine.tart, self.name, self.shares)
+        argv = tart_run_argv(self.engine.tart, self.name, self.shares, vnc=self.vnc)
         mark = time.monotonic()
         self._proc = subprocess.Popen(
             argv,
@@ -77,6 +87,25 @@ class Machine:
             "boot_seconds": round(booted - mark, 1),
             "ssh_seconds": round(time.monotonic() - booted, 1),
         }
+
+    def vnc_address(self, timeout: float = VNC_WAIT_SECONDS) -> VncAddress:
+        """The address of the screen's VNC server, read from the line Tart wrote to the log."""
+        deadline = time.monotonic() + timeout
+        while True:
+            self._raise_if_exited()
+            text = (
+                self.log_path.read_text(encoding="utf-8", errors="replace")
+                if self.log_path.exists()
+                else ""
+            )
+            address = parse_vnc_address(text)
+            if address is not None:
+                return address
+            if time.monotonic() >= deadline:
+                raise ProofError(
+                    f"no VNC address for {self.name} in {timeout:.0f}s\n{self._log_tail()}"
+                )
+            time.sleep(0.5)
 
     def _raise_if_exited(self) -> None:
         if self._proc is not None and self._proc.poll() is not None:
@@ -156,14 +185,14 @@ class Machine:
         self.run("sync", timeout=60)
         self.halt()
         self.engine.checked("clone", self.name, f"{self.name}-snap-{tag}", "--overwrite")
-        self.start(self.shares)
+        self.start(self.shares, vnc=self.vnc)
 
     def restore(self, tag: str) -> None:
         """Replace this machine with a snapshot and boot it."""
         self.halt()
         self.engine.checked("delete", self.name)
         self.engine.checked("clone", f"{self.name}-snap-{tag}", self.name)
-        self.start(self.shares)
+        self.start(self.shares, vnc=self.vnc)
 
     def destroy(self) -> None:
         if self.keep:

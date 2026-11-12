@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from prove_engine.model import HostInfo, Image, ProofError, Share
+from prove_engine.model import HostInfo, Image, ProofError, Share, VncAddress
 from prove_engine.pins import (
     GUEST_USER,
     IMAGES,
@@ -78,11 +78,27 @@ def parse_share(spec: str) -> Share:
     return Share(name, path, read_only)
 
 
-def tart_run_argv(tart: Path, name: str, shares: Sequence[Share]) -> list[str]:
+VNC_ADDRESS_RE = re.compile(r"vnc://:(?P<password>[^@\s]+)@(?P<host>[^:\s]+):(?P<port>\d+)")
+
+
+def tart_run_argv(
+    tart: Path, name: str, shares: Sequence[Share], *, vnc: bool = False
+) -> list[str]:
+    """The headless `tart run` command; `vnc` also serves the screen over Tart's VNC server."""
     argv = [str(tart), "run", "--no-graphics", "--no-audio", "--no-clipboard"]
+    if vnc:
+        argv.append("--vnc-experimental")
     for share in shares:
         argv += ["--dir", share.to_arg()]
     return [*argv, name]
+
+
+def parse_vnc_address(text: str) -> VncAddress | None:
+    """The address in the line Tart prints once its VNC server runs, or None before that."""
+    found = VNC_ADDRESS_RE.search(text)
+    if found is None:
+        return None
+    return VncAddress(found["host"], int(found["port"]), found["password"])
 
 
 def ssh_argv(ip: str, remote: str) -> list[str]:

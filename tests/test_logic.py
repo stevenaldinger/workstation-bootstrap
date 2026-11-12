@@ -15,6 +15,7 @@ from prove_engine import (
     HostInfo,
     ProofError,
     Share,
+    VncAddress,
     logic,
     parse_share,
     pins,
@@ -166,6 +167,39 @@ def test_tart_run_argv_is_headless_and_orders_shares_before_the_name() -> None:
 
 def test_tart_run_argv_without_shares_has_no_dir_flag() -> None:
     assert "--dir" not in logic.tart_run_argv(Path("/c/tart"), "n", [])
+
+
+def test_tart_run_argv_serves_the_screen_over_vnc_only_when_asked() -> None:
+    argv = logic.tart_run_argv(Path("/c/tart"), "wsrun-x-1", [], vnc=True)
+    assert "--vnc-experimental" in argv
+    assert argv.index("--vnc-experimental") < argv.index("wsrun-x-1")
+    assert "--vnc-experimental" not in logic.tart_run_argv(Path("/c/tart"), "wsrun-x-1", [])
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "VNC server is running at vnc://:spike-minimum-school-wolf@127.0.0.1:53327\n",
+            VncAddress("127.0.0.1", 53327, "spike-minimum-school-wolf"),
+        ),
+        (
+            "noise\nVNC server is running at vnc://:a-b@127.0.0.1:5900\nmore\n",
+            VncAddress("127.0.0.1", 5900, "a-b"),
+        ),
+        ("vnc://:pw@localhost:1", VncAddress("localhost", 1, "pw")),
+    ],
+)
+def test_parse_vnc_address_reads_the_address_tart_prints(text: str, expected: VncAddress) -> None:
+    assert logic.parse_vnc_address(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", "tart run exited", "vnc://127.0.0.1:5900", "vnc://:pw@127.0.0.1", "vnc://:pw@h:notaport"],
+)
+def test_parse_vnc_address_returns_nothing_without_a_full_address(text: str) -> None:
+    assert logic.parse_vnc_address(text) is None
 
 
 def test_ssh_argv_ignores_host_config_and_keys_and_ends_with_the_command() -> None:

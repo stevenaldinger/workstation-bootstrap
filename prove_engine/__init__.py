@@ -15,7 +15,16 @@ from __future__ import annotations
 from prove_engine.engine import Engine, write_evidence
 from prove_engine.logic import parse_share, select_image
 from prove_engine.machine import Machine
-from prove_engine.model import Base, CommandResult, HostInfo, Image, ProofError, RunResult, Share
+from prove_engine.model import (
+    Base,
+    CommandResult,
+    HostInfo,
+    Image,
+    ProofError,
+    RunResult,
+    Share,
+    VncAddress,
+)
 from prove_engine.process import host_info, run_command
 
 __all__ = [
@@ -28,6 +37,7 @@ __all__ = [
     "ProofError",
     "RunResult",
     "Share",
+    "VncAddress",
     "host_info",
     "parse_share",
     "run_command",

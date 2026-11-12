@@ -46,6 +46,15 @@ class Share:
 
 
 @dataclass(frozen=True)
+class VncAddress:
+    """Where a guest's screen is served: the address and one-time password Tart prints."""
+
+    host: str
+    port: int
+    password: str
+
+
+@dataclass(frozen=True)
 class CommandResult:
     argv: tuple[str, ...]
     exit_code: int

@@ -16,6 +16,7 @@ from prove_engine import (
     Machine,
     ProofError,
     Share,
+    VncAddress,
     pins,
     run_command,
     select_image,
@@ -92,6 +93,47 @@ def test_start_refuses_a_share_that_is_not_a_directory(tmp_path: Path) -> None:
         vm.start([Share("repo", tmp_path / "missing", True)])
 
 
+# --- The screen over VNC -----------------------------------------------------------
+
+
+def test_vnc_address_comes_from_the_line_tart_wrote_to_the_machines_log(tmp_path: Path) -> None:
+    engine = make_engine(tmp_path, FakeRunner())
+    vm = Machine(engine, "wsrun-x-1", Base(select_image(26), "ws-base-26"))
+    engine.logs.mkdir(parents=True)
+    vm.log_path.write_text(
+        "starting\nVNC server is running at vnc://:pw-one-two@127.0.0.1:5901\n", encoding="utf-8"
+    )
+    assert vm.vnc_address(timeout=1) == VncAddress("127.0.0.1", 5901, "pw-one-two")
+
+
+def test_vnc_address_gives_up_with_the_log_tail_when_tart_printed_none(tmp_path: Path) -> None:
+    engine = make_engine(tmp_path, FakeRunner())
+    vm = Machine(engine, "wsrun-x-1", Base(select_image(26), "ws-base-26"))
+    engine.logs.mkdir(parents=True)
+    vm.log_path.write_text("no address here\n", encoding="utf-8")
+    with pytest.raises(ProofError, match="no VNC address"):
+        vm.vnc_address(timeout=0)
+
+
+def test_snapshot_boots_again_with_the_screen_served_when_it_was_before(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = make_engine(tmp_path, FakeRunner())
+    engine.cache_root.mkdir(parents=True)
+    vm = Machine(engine, "wsrun-x-1", Base(select_image(26), "ws-base-26"))
+    vm.ip = "10.0.0.3"
+    vm.vnc = True
+    booted: list[bool] = []
+
+    def record_start(self: Machine, shares: object = (), *, vnc: bool = False) -> dict[str, float]:
+        booted.append(vnc)
+        return {}
+
+    monkeypatch.setattr(Machine, "start", record_start)
+    vm.snapshot("clean")
+    assert booted == [True]
+
+
 # --- Snapshots -----------------------------------------------------------------------
 
 
@@ -103,7 +145,7 @@ def test_snapshot_flushes_the_guest_before_copying_its_disk(
     engine.cache_root.mkdir(parents=True)
     vm = Machine(engine, "wsrun-x-1", Base(select_image(26), "ws-base-26"))
     vm.ip = "10.0.0.3"
-    monkeypatch.setattr(Machine, "start", lambda self, shares=(): {})
+    monkeypatch.setattr(Machine, "start", lambda self, shares=(), *, vnc=False: {})
     vm.snapshot("clean")
     sequence = [call[-1] if call[0] == "ssh" else " ".join(call[1:]) for call in runner.calls]
     assert sequence == ["sync", "clone wsrun-x-1 wsrun-x-1-snap-clean --overwrite"]
@@ -115,6 +157,6 @@ def test_restore_replaces_the_machine_with_its_snapshot(
     runner = FakeRunner()
     engine = make_engine(tmp_path, runner)
     vm = Machine(engine, "wsrun-x-1", Base(select_image(26), "ws-base-26"))
-    monkeypatch.setattr(Machine, "start", lambda self, shares=(): {})
+    monkeypatch.setattr(Machine, "start", lambda self, shares=(), *, vnc=False: {})
     vm.restore("clean")
     assert runner.tart_calls() == ["delete wsrun-x-1", "clone wsrun-x-1-snap-clean wsrun-x-1"]
