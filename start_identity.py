@@ -9,8 +9,6 @@ from collections.abc import Callable
 
 from start_base import MESSAGES, Context, Probe, StageError, run_human_step, tail
 
-ITEM_TITLE = "GitHub SSH (workstation)"
-VAULT = "Private"
 PUBLIC_KEY_FIELD_LABEL = "public key"
 KEY_PREFIX = "ssh-ed25519 "
 SSH_DIR_MODE = 0o700
@@ -46,7 +44,7 @@ def personal_account(ctx: Context) -> dict[str, str] | None:
 def check_signed_in(ctx: Context) -> Probe:
     account = personal_account(ctx)
     if account is None:
-        return Probe(False, MESSAGES["h1.absent"].format(account=ctx.personal))
+        return Probe(False, MESSAGES["sign-in.absent"].format(account=ctx.personal))
     ctx.account_id = account["account_uuid"]
     return Probe(True)
 
@@ -54,9 +52,13 @@ def check_signed_in(ctx: Context) -> Probe:
 def check_integrations(ctx: Context) -> Probe:
     vaults = ctx.run(["op", "vault", "list", "--account", ctx.account_id, "--format", "json"], None)
     if vaults.returncode != 0:
-        return Probe(False, MESSAGES["h3.vault-denied"].format(detail=tail(vaults.output)))
+        return Probe(
+            False, MESSAGES["integrations.vault-denied"].format(detail=tail(vaults.output))
+        )
     if not ctx.socket_ready(ctx.agent_socket):
-        return Probe(False, MESSAGES["h3.socket-missing"].format(path=str(ctx.agent_socket)))
+        return Probe(
+            False, MESSAGES["integrations.socket-missing"].format(path=str(ctx.agent_socket))
+        )
     return Probe(True)
 
 
@@ -72,10 +74,10 @@ def open_command(ctx: Context, *argv: str) -> Callable[[], None]:
 def sign_in(ctx: Context) -> None:
     run_human_step(
         ctx,
-        "H1",
+        "sign-in.title",
         lambda: check_signed_in(ctx),
         open_command(ctx, "-a", APP_NAME),
-        "h1.prompt",
+        "sign-in.prompt",
         account=ctx.personal,
     )
 
@@ -83,15 +85,15 @@ def sign_in(ctx: Context) -> None:
 def enable_integrations(ctx: Context) -> None:
     run_human_step(
         ctx,
-        "H3",
+        "integrations.title",
         lambda: check_integrations(ctx),
         open_command(ctx, SETTINGS_URL),
-        "h3.prompt",
+        "integrations.prompt",
     )
 
 
 def item_arguments(ctx: Context) -> list[str]:
-    return ["--vault", VAULT, "--account", ctx.account_id]
+    return ["--vault", ctx.config.identity.vault, "--account", ctx.account_id]
 
 
 def public_key_from_item(text: str) -> str:
@@ -109,19 +111,22 @@ def public_key_from_item(text: str) -> str:
 
 def read_public_key(ctx: Context) -> str:
     """The key through `op read`, falling back to the item's JSON field."""
-    reference = f"op://{VAULT}/{ITEM_TITLE}/{PUBLIC_KEY_FIELD_LABEL}"
+    identity = ctx.config.identity
+    reference = f"op://{identity.vault}/{identity.item_title}/{PUBLIC_KEY_FIELD_LABEL}"
     read = ctx.run(["op", "read", reference, "--account", ctx.account_id], None)
     key = read.stdout.strip()
     if read.returncode == 0 and key.startswith(KEY_PREFIX):
         return key
     item = ctx.run(
-        ["op", "item", "get", ITEM_TITLE, *item_arguments(ctx), "--format", "json"], None
+        ["op", "item", "get", identity.item_title, *item_arguments(ctx), "--format", "json"], None
     )
     key = public_key_from_item(item.stdout)
     if key.startswith(KEY_PREFIX):
         return key
     raise StageError(
-        MESSAGES["key.unreadable"].format(item=ITEM_TITLE, detail=tail(read.output or item.output))
+        MESSAGES["key.unreadable"].format(
+            item=identity.item_title, detail=tail(read.output or item.output)
+        )
     )
 
 
@@ -132,22 +137,24 @@ def ensure_ssh_dir(ctx: Context) -> None:
 
 def create_key(ctx: Context) -> None:
     """Create the key item and write its public half, each only when missing or different."""
+    identity = ctx.config.identity
     existing = ctx.run(
-        ["op", "item", "get", ITEM_TITLE, *item_arguments(ctx), "--format", "json"], None
+        ["op", "item", "get", identity.item_title, *item_arguments(ctx), "--format", "json"], None
     )
     if existing.returncode != 0:
+        generate = ["--category", "ssh", "--ssh-generate-key", "ed25519"]
         created = ctx.run(
-            [
-                "op", "item", "create", "--category", "ssh", "--ssh-generate-key", "ed25519",
-                "--title", ITEM_TITLE, *item_arguments(ctx), "--format", "json",
-            ],
+            ["op", "item", "create", *generate, "--title", identity.item_title]
+            + [*item_arguments(ctx), "--format", "json"],
             None,
-        )  # fmt: skip
+        )
         if created.returncode != 0:
             raise StageError(
-                MESSAGES["key.unreadable"].format(item=ITEM_TITLE, detail=tail(created.output))
+                MESSAGES["key.unreadable"].format(
+                    item=identity.item_title, detail=tail(created.output)
+                )
             )
-        ctx.console.say("key.created", item=ITEM_TITLE, vault=VAULT)
+        ctx.console.say("key.created", item=identity.item_title, vault=identity.vault)
     ensure_ssh_dir(ctx)
     content = read_public_key(ctx) + "\n"
     current = ctx.key_file.read_text(encoding="utf-8") if ctx.key_file.is_file() else None
@@ -158,13 +165,15 @@ def create_key(ctx: Context) -> None:
 
 def ssh_options(ctx: Context) -> list[str]:
     """Options that make ssh use the 1Password agent and offer only the workstation key."""
-    return [
-        "-F", "/dev/null",
-        "-o", f"IdentityAgent={ctx.agent_socket}",
-        "-o", "IdentitiesOnly=yes",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-i", str(ctx.key_file),
-    ]  # fmt: skip
+    options = [
+        f"IdentityAgent={ctx.agent_socket}",
+        "IdentitiesOnly=yes",
+        "StrictHostKeyChecking=accept-new",
+    ]
+    return ["-F", "/dev/null", *(arg for option in options for arg in ("-o", option))] + [
+        "-i",
+        str(ctx.key_file),
+    ]
 
 
 def handshake(ctx: Context) -> Probe:
@@ -186,7 +195,7 @@ def check_scope(ctx: Context) -> Probe:
     _, has_scope = token_scopes(ctx)
     if has_scope:
         return Probe(True)
-    return Probe(False, MESSAGES["h4.scope-missing"].format(scope=KEY_SCOPE))
+    return Probe(False, MESSAGES["approval.scope-missing"].format(scope=KEY_SCOPE))
 
 
 def approve_github(ctx: Context) -> None:
@@ -194,10 +203,8 @@ def approve_github(ctx: Context) -> None:
     if signed_in:
         command = ["gh", "auth", "refresh", "--hostname", GITHUB_HOST, "--scopes", KEY_SCOPE]
     else:
-        command = [
-            "gh", "auth", "login", "--hostname", GITHUB_HOST, "--git-protocol", "ssh",
-            "--web", "--skip-ssh-key", "--scopes", KEY_SCOPE,
-        ]  # fmt: skip
+        login = ["--hostname", GITHUB_HOST, "--git-protocol", "ssh", "--web", "--skip-ssh-key"]
+        command = ["gh", "auth", "login", *login, "--scopes", KEY_SCOPE]
     ctx.stream(command, None)
 
 
@@ -214,10 +221,10 @@ def register_key(ctx: Context) -> None:
         return
     run_human_step(
         ctx,
-        "H4",
+        "register.title",
         lambda: check_scope(ctx),
         lambda: approve_github(ctx),
-        "h4.prompt",
+        "approval.prompt",
         waits=False,
     )
     key = ctx.key_file.read_text(encoding="utf-8").strip()

@@ -15,9 +15,7 @@ python_version = "3.12"
 strict = true
 files = [
     "prove.py",
-    "start.py",
-    "start_base.py",
-    "start_identity.py",
+    "start*.py",
     "prove_engine",
     "scripts",
     "tests",

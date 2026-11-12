@@ -8,9 +8,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from starter_support import starter_files
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "start.sha256"
-STARTER_FILES = ("start.py", "start_base.py", "start_identity.py", "stage1.toml")
+STARTER_FILES = starter_files()
 
 
 def pin(text: str, name: str) -> str:

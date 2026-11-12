@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 """Run commands inside throwaway macOS virtual machines, using a checksum-pinned Tart.
 
 The engine downloads one pinned Tart release into a cache folder (nothing is installed

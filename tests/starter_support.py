@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -17,6 +18,7 @@ import fake_tools
 import pytest
 
 import start_base as base
+from start_config import StartConfig, load_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FAKE_TOOLS = Path(fake_tools.__file__).resolve()
@@ -152,6 +154,32 @@ def make_mirror(root: Path) -> Path:
     subprocess.run([*git, "add", "-A"], check=True)
     subprocess.run([*git, "commit", "-q", "-m", "mirror"], check=True)
     return mirror
+
+
+def starter_files() -> tuple[str, ...]:
+    """The files `scripts/pins.sh` pins and `start.sh` downloads: its STARTER_FILES list."""
+    script = (REPO_ROOT / "scripts" / "pins.sh").read_text(encoding="utf-8")
+    match = re.search(r"^STARTER_FILES=\((.*)\)$", script, flags=re.M)
+    assert match, "scripts/pins.sh has no STARTER_FILES list"
+    return tuple(match.group(1).split())
+
+
+def starter_config() -> StartConfig:
+    """The settings the starter ships with."""
+    return load_config(REPO_ROOT / "start.toml")
+
+
+def make_context(
+    machine: Machine, session: Session | None = None, *, config: StartConfig | None = None
+) -> base.Context:
+    """A starter context on the machine's home, with the session's console."""
+    return base.Context(
+        home=machine.home,
+        personal=PERSONAL_EMAIL,
+        console=(session or make_session()).console,
+        config=config or starter_config(),
+        socket_ready=machine.socket_ready,
+    )
 
 
 def fresh_world() -> dict[str, Any]:

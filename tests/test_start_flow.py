@@ -15,12 +15,16 @@ from starter_support import (
     Machine,
     Session,
     build_machine,
+    make_context,
     make_mirror,
     make_session,
+    starter_config,
+    starter_files,
 )
 
 import start
 import start_base as base
+import start_clone
 import start_identity as identity
 
 HEADING_RE = re.compile(r"^\[[0-9]+/[0-9]+\] ")
@@ -166,8 +170,8 @@ def test_the_clone_uses_the_agent_and_sets_the_hooks_path(machine: Machine, mirr
 
 
 def test_the_clone_environment_pins_the_agent_socket_and_key(machine: Machine) -> None:
-    ctx = base.Context(machine.home, PERSONAL_EMAIL, make_session().console)
-    command = start.clone_environment(ctx)["GIT_SSH_COMMAND"]
+    ctx = make_context(machine)
+    command = start_clone.clone_environment(ctx)["GIT_SSH_COMMAND"]
     assert "IdentitiesOnly=yes" in command
     assert str(ctx.key_file) in command
     assert "agent.sock" in command
@@ -193,9 +197,13 @@ def test_a_rerun_on_a_satisfied_machine_prompts_and_changes_nothing(
     session, second = make_session(), Recorder()
     assert run_starter(machine, session, mirror, second, Exec()) == 0
     assert session.person.enters == 0
-    assert {"h1.prompt", "h3.prompt", "h4.prompt", "key.created", "register.registered"}.isdisjoint(
-        session.console.shown
-    )
+    assert {
+        "sign-in.prompt",
+        "integrations.prompt",
+        "approval.prompt",
+        "key.created",
+        "register.registered",
+    }.isdisjoint(session.console.shown)
     assert second.count("op", "item", "create") == 0
     assert second.count("mise", "bootstrap", "packages", "apply") == 0
     assert second.count("gh") == 0
@@ -208,7 +216,7 @@ def test_an_interrupted_run_resumes_at_the_first_unsatisfied_step(
     session = make_session()
     interrupted = Recorder()
     assert run_starter(machine, session, mirror, interrupted, Exec()) == base.EXIT_INPUT_ENDED
-    assert session.console.shown[-2:] == ["h1.prompt", "input.ended"]
+    assert session.console.shown[-2:] == ["sign-in.prompt", "input.ended"]
     assert interrupted.count("mise", "bootstrap", "packages", "apply") == 1
     assert interrupted.count("git") == 0
     satisfied(machine)
@@ -284,14 +292,14 @@ def test_the_key_file_is_public_only_and_the_directory_is_private(
     ssh_dir = machine.home / ".ssh"
     assert stat.S_IMODE(ssh_dir.stat().st_mode) == 0o700
     assert [path.name for path in ssh_dir.iterdir() if path.suffix != ".pub"] == []
-    public = ssh_dir / base.KEY_FILE_NAME
+    public = ssh_dir / starter_config().identity.key_file_name
     assert public.read_text(encoding="utf-8").startswith("ssh-ed25519 ")
     assert stat.S_IMODE(public.stat().st_mode) == 0o644
 
 
 def test_the_key_item_is_created_once_and_read_from_the_private_vault(machine: Machine) -> None:
     satisfied(machine)
-    ctx = base.Context(machine.home, PERSONAL_EMAIL, make_session().console)
+    ctx = make_context(machine)
     identity.sign_in(ctx)
     identity.create_key(ctx)
     identity.create_key(ctx)
@@ -317,7 +325,7 @@ def test_the_key_item_is_created_once_and_read_from_the_private_vault(machine: M
 
 def test_every_item_command_names_the_account_explicitly(machine: Machine) -> None:
     satisfied(machine)
-    ctx = base.Context(machine.home, PERSONAL_EMAIL, make_session().console)
+    ctx = make_context(machine)
     identity.sign_in(ctx)
     identity.create_key(ctx)
     item_calls = [call for call in machine.calls("op") if call[0] in ("item", "read", "vault")]
@@ -328,7 +336,7 @@ def test_every_item_command_names_the_account_explicitly(machine: Machine) -> No
 def test_an_existing_key_item_is_used_not_recreated(machine: Machine) -> None:
     satisfied(machine)
     machine.update(lambda world: world.update(item="ssh-ed25519 AAAAexisting comment"))
-    ctx = base.Context(machine.home, PERSONAL_EMAIL, make_session().console)
+    ctx = make_context(machine)
     identity.sign_in(ctx)
     identity.create_key(ctx)
     assert not any(call[:2] == ["item", "create"] for call in machine.calls("op"))
@@ -338,7 +346,7 @@ def test_an_existing_key_item_is_used_not_recreated(machine: Machine) -> None:
 def test_the_public_key_falls_back_to_the_item_field(machine: Machine) -> None:
     satisfied(machine)
     machine.update(lambda world: world.update(item="ssh-ed25519 AAAAfield comment", read_mode="x"))
-    ctx = base.Context(machine.home, PERSONAL_EMAIL, make_session().console)
+    ctx = make_context(machine)
     identity.sign_in(ctx)
     identity.create_key(ctx)
     assert ctx.key_file.read_text(encoding="utf-8").startswith("ssh-ed25519 AAAAfield")
@@ -347,7 +355,7 @@ def test_the_public_key_falls_back_to_the_item_field(machine: Machine) -> None:
 def test_an_unreadable_public_key_stops_with_the_cause(machine: Machine) -> None:
     satisfied(machine)
     machine.update(lambda world: world.update(item="not-a-key", read_mode="x"))
-    ctx = base.Context(machine.home, PERSONAL_EMAIL, make_session().console)
+    ctx = make_context(machine)
     identity.sign_in(ctx)
     with pytest.raises(base.StageError, match="could not be read"):
         identity.create_key(ctx)
@@ -364,7 +372,7 @@ def test_public_key_from_item_ignores_documents_without_the_field() -> None:
 def test_the_starter_holds_no_email_address_or_account_data() -> None:
     root = Path(__file__).resolve().parents[1]
     emails = re.compile(r"[\w.+-]+@(?!github\.com)[\w-]+\.[a-z]{2,}")
-    for name in ("start.py", "start.sh", "stage1.toml"):
+    for name in (*starter_files(), "start.sh"):
         text = (root / name).read_text(encoding="utf-8")
         assert emails.findall(text) == [], name
         assert "1password.com" not in text, name

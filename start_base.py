@@ -7,35 +7,37 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from start_config import StartConfig
 
 AGENT_SOCKET_RELATIVE = Path("Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock")
-CLONE_RELATIVE = Path(".config/mise")
-KEY_FILE_NAME = "github_workstation.pub"
 TAIL_LINES = 3
 EXIT_FAILED = 1
 EXIT_INPUT_ENDED = 130
 
 MESSAGES: dict[str, str] = {
     "step.heading": "[{n}/{total}] {title}",
-    "step.failed": "{step} is not satisfied yet: {detail}",
+    "step.failed": 'Still waiting on "{step}": {detail}',
     "step.retry": "Press Enter to try again.",
     "input.ended": "Input ended before {step} finished; run the same command again to resume.",
     "stage1.title": "Install the password manager, Git, and the GitHub CLI",
     "stage1.failed": "Installing the stage-1 packages failed: {detail}",
-    "h1.title": "Sign in to the personal 1Password account",
-    "h1.prompt": (
+    "sign-in.title": "Sign in to the personal 1Password account",
+    "sign-in.prompt": (
         "In the 1Password app that just opened, sign in to the personal account {account}, "
         "then press Enter. The app's developer settings must also have 'Integrate with "
         "1Password CLI' turned on, or the command line cannot see the account."
     ),
-    "h1.absent": "the personal account {account} is not listed by the 1Password command line",
-    "h3.title": "Turn on the 1Password command-line integration and SSH agent",
-    "h3.prompt": (
+    "sign-in.absent": "the personal account {account} is not listed by the 1Password command line",
+    "integrations.title": "Turn on the 1Password command-line integration and SSH agent",
+    "integrations.prompt": (
         "In the 1Password developer settings that just opened, turn on 'Integrate with "
         "1Password CLI' and 'Use the SSH agent', then press Enter."
     ),
-    "h3.vault-denied": "the command line could not list vaults: {detail}",
-    "h3.socket-missing": "the 1Password SSH agent socket does not exist at {path}",
+    "integrations.vault-denied": "the command line could not list vaults: {detail}",
+    "integrations.socket-missing": "the 1Password SSH agent socket does not exist at {path}",
     "key.title": "Create the GitHub SSH key in 1Password",
     "key.created": "Created the key {item} in the {vault} vault.",
     "key.unreadable": "The public key of {item} could not be read: {detail}",
@@ -47,11 +49,10 @@ MESSAGES: dict[str, str] = {
         "GitHub did not accept the key: {detail}. Lock and unlock 1Password so its agent offers "
         "the new key, then run the same command again."
     ),
-    "h4.title": "Approve the GitHub sign-in",
-    "h4.prompt": (
+    "approval.prompt": (
         "Approve the GitHub sign-in in the browser with the one-time code the next command prints."
     ),
-    "h4.scope-missing": "the GitHub token lacks the {scope} scope",
+    "approval.scope-missing": "the GitHub token lacks the {scope} scope",
     "clone.title": "Clone the setup repository",
     "clone.foreign": "{path} exists and is not a checkout of the setup repository; move it away.",
     "clone.failed": "Cloning the setup repository failed: {detail}",
@@ -147,6 +148,7 @@ class Context:
     home: Path
     personal: str
     console: Console
+    config: StartConfig
     run: Runner = run_captured
     stream: Streamer = run_streamed
     socket_ready: SocketCheck = Path.is_socket
@@ -158,7 +160,7 @@ class Context:
 
     @property
     def key_file(self) -> Path:
-        return self.ssh_dir / KEY_FILE_NAME
+        return self.ssh_dir / self.config.identity.key_file_name
 
     @property
     def agent_socket(self) -> Path:
@@ -166,7 +168,7 @@ class Context:
 
     @property
     def clone_dir(self) -> Path:
-        return self.home / CLONE_RELATIVE
+        return self.home / self.config.repository.clone_dir
 
 
 def tail(output: str) -> str:
@@ -176,7 +178,7 @@ def tail(output: str) -> str:
 
 def run_human_step(
     ctx: Context,
-    step_id: str,
+    title_id: str,
     check: Callable[[], Probe],
     act: Callable[[], None],
     prompt: str,
@@ -189,7 +191,7 @@ def run_human_step(
     attempts = 0
     while not probe.ok:
         if attempts > 0:
-            ctx.console.say("step.failed", step=step_id, detail=probe.detail)
+            ctx.console.say("step.failed", step=MESSAGES[title_id], detail=probe.detail)
             if not waits:
                 ctx.console.say("step.retry")
                 ctx.console.wait()

@@ -1,0 +1,17 @@
+# Settings the starter reads once at startup. They are the values an operator might change
+# for another account or another setup repository; none is secret.
+
+[identity]
+# The 1Password item that holds the GitHub SSH key, and the vault it lives in.
+item_title = "GitHub SSH (workstation)"
+vault = "Private"
+# The public half of the key is written to this file under ~/.ssh.
+key_file_name = "github_workstation.pub"
+
+[repository]
+# The setup repository. The WS_REPO_URL environment variable replaces the address.
+url = "git@github.com:stevenaldinger/workstation-setup.git"
+# Where the repository is cloned, relative to the home folder.
+clone_dir = ".config/mise"
+# The hook folder set in the clone.
+hooks_path = ".githooks"

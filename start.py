@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Stage 1 of the workstation bootstrap: tools, SSH identity, clone, and hand-off.
 
 `start.sh` installs a pinned mise, Python, and uv, then runs this file under that Python.
@@ -9,18 +10,22 @@ waits for Enter, checks again, and repeats until the check passes.
 
     python start.py --personal-account <email or sign-in address> [--stage1 stage1.toml]
 
-Any argument this file does not recognize is passed on to `ws bootstrap`. Set WS_REPO_URL to
-clone the setup repository from somewhere other than GitHub. The identity steps live in
-`start_identity.py` and the shared plumbing in `start_base.py`; `start.sh` fetches all three.
+Any argument this file does not recognize is passed on to `ws bootstrap`. Settings live in
+`start.toml`; set WS_REPO_URL to clone the setup repository from somewhere other than the
+configured address.
+
+The modules sit side by side, not in a package, because `start.sh` downloads exactly the files
+listed in `start.sha256` into one folder and runs this file from it, so Python finds its
+siblings there. `start_base.py` holds the shared plumbing, `start_config.py` loads
+`start.toml`, `start_packages.py` installs the stage-1 packages, `start_identity.py` holds the
+identity steps, and `start_clone.py` clones and hands off.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import shlex
 import sys
-import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
@@ -38,74 +43,13 @@ from start_base import (
     Streamer,
     run_captured,
     run_streamed,
-    tail,
 )
-from start_identity import (
-    create_key,
-    enable_integrations,
-    register_key,
-    sign_in,
-    ssh_options,
-)
+from start_clone import clone_repository, hand_off
+from start_config import CONFIG_NAME, load_config
+from start_identity import create_key, enable_integrations, register_key, sign_in
+from start_packages import install_stage1
 
-DEFAULT_REPO_URL = "git@github.com:stevenaldinger/workstation-setup.git"
 REPO_URL_ENV = "WS_REPO_URL"
-HOOKS_PATH = ".githooks"
-WS_RELATIVE = Path("bin/ws")
-
-
-def clone_environment(ctx: Context) -> dict[str, str]:
-    """The environment that makes git's ssh use the agent and the workstation key."""
-    return {"GIT_SSH_COMMAND": shlex.join(["ssh", *ssh_options(ctx)])}
-
-
-def directory_is_empty(path: Path) -> bool:
-    return path.is_dir() and not any(path.iterdir())
-
-
-def clone_repository(ctx: Context, url: str) -> None:
-    """Clone to the mise config directory, or fast-forward an existing checkout of the remote."""
-    target = ctx.clone_dir
-    environment = clone_environment(ctx)
-    if (target / ".git").exists():
-        origin = ctx.run(["git", "-C", str(target), "config", "--get", "remote.origin.url"], None)
-        if origin.stdout.strip() != url:
-            raise StageError(MESSAGES["clone.foreign"].format(path=str(target)))
-        command = ["git", "-C", str(target), "pull", "--ff-only"]
-    elif target.exists() and not directory_is_empty(target):
-        raise StageError(MESSAGES["clone.foreign"].format(path=str(target)))
-    else:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        command = ["git", "clone", url, str(target)]
-    result = ctx.run(command, environment)
-    if result.returncode != 0:
-        raise StageError(MESSAGES["clone.failed"].format(detail=tail(result.output)))
-    hooks = ctx.run(["git", "-C", str(target), "config", "core.hooksPath", HOOKS_PATH], None)
-    if hooks.returncode != 0:
-        raise StageError(MESSAGES["clone.failed"].format(detail=tail(hooks.output)))
-
-
-def install_stage1(ctx: Context, stage1: Path) -> None:
-    """Install the stage-1 packages unless `mise bootstrap packages status` finds none missing."""
-    # Mise merges every file in its config directory with the global file, so once the clone
-    # exists a re-run would see all declared packages. An empty directory keeps this stage to
-    # the stage-1 list.
-    with tempfile.TemporaryDirectory(prefix="stage1-") as empty:
-        environment = {"MISE_GLOBAL_CONFIG_FILE": str(stage1), "MISE_CONFIG_DIR": empty}
-        status = ctx.run(["mise", "bootstrap", "packages", "status", "--missing"], environment)
-        if status.returncode == 0:
-            return
-        code = ctx.stream(["mise", "bootstrap", "packages", "apply", "--yes"], environment)
-        if code != 0:
-            raise StageError(MESSAGES["stage1.failed"].format(detail=f"exit {code}"))
-
-
-def hand_off(ctx: Context, extra: Sequence[str], execv: Execv) -> None:
-    """Replace this process with the cloned repository's `ws bootstrap`."""
-    ws = ctx.clone_dir / WS_RELATIVE
-    if not ws.is_file():
-        raise StageError(MESSAGES["handoff.missing"].format(path=str(WS_RELATIVE)))
-    execv(str(ws), [str(ws), "bootstrap", *extra])
 
 
 def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
@@ -122,6 +66,12 @@ def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
         type=Path,
         default=Path(__file__).with_name("stage1.toml"),
         help="Package list to install first (default: stage1.toml next to this file).",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path(__file__).with_name(CONFIG_NAME),
+        help=f"Starter settings (default: {CONFIG_NAME} next to this file).",
     )
     return parser.parse_known_args(list(argv))
 
@@ -140,24 +90,32 @@ def main(
     """Run every step in order; return the exit status when a step fails."""
     args, extra = parse_args(sys.argv[1:] if argv is None else argv)
     env = os.environ if environ is None else environ
+    console = console or Console()
+    try:
+        config = load_config(args.config)
+    except StageError as error:
+        print(error, file=sys.stderr)
+        return EXIT_FAILED
     ctx = Context(
         home=home or Path.home(),
         personal=args.personal_account,
-        console=console or Console(),
+        console=console,
+        config=config,
         run=run,
         stream=stream,
         socket_ready=socket_ready,
     )
-    url = env.get(REPO_URL_ENV) or DEFAULT_REPO_URL
+    url = env.get(REPO_URL_ENV) or config.repository.url
     steps: list[tuple[str, Callable[[], None]]] = [
         ("stage1.title", lambda: install_stage1(ctx, args.stage1)),
-        ("h1.title", lambda: sign_in(ctx)),
-        ("h3.title", lambda: enable_integrations(ctx)),
+        ("sign-in.title", lambda: sign_in(ctx)),
+        ("integrations.title", lambda: enable_integrations(ctx)),
         ("key.title", lambda: create_key(ctx)),
         ("register.title", lambda: register_key(ctx)),
         ("clone.title", lambda: clone_repository(ctx, url)),
         ("handoff.title", lambda: hand_off(ctx, extra, execv)),
     ]
+    title = ""
     try:
         for number, (title_id, step) in enumerate(steps, start=1):
             title = MESSAGES[title_id]

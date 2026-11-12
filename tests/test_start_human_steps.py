@@ -1,4 +1,4 @@
-"""Human steps H1, H3, and H4: skip when satisfied, otherwise prompt, wait, and re-check."""
+"""The human steps: skip when satisfied, otherwise prompt, wait, and re-check."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from starter_support import (
     Machine,
     Session,
     build_machine,
+    make_context,
     make_session,
 )
 
@@ -26,19 +27,14 @@ def machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Machine:
 
 
 def context(machine: Machine, session: Session) -> base.Context:
-    return base.Context(
-        home=machine.home,
-        personal=PERSONAL_EMAIL,
-        console=session.console,
-        socket_ready=machine.socket_ready,
-    )
+    return make_context(machine, session)
 
 
 def open_calls(machine: Machine) -> list[list[str]]:
     return machine.calls("open")
 
 
-def test_h1_is_skipped_silently_when_the_personal_account_is_listed(machine: Machine) -> None:
+def test_sign_in_is_skipped_silently_when_the_personal_account_is_listed(machine: Machine) -> None:
     machine.sign_in(PERSONAL_ACCOUNT)
     session = make_session()
     ctx = context(machine, session)
@@ -48,31 +44,31 @@ def test_h1_is_skipped_silently_when_the_personal_account_is_listed(machine: Mac
     assert ctx.account_id == PERSONAL_ACCOUNT["account_uuid"]
 
 
-def test_h1_prompts_then_passes_once_the_account_is_listed(machine: Machine) -> None:
+def test_sign_in_prompts_then_passes_once_the_account_is_listed(machine: Machine) -> None:
     session = make_session(lambda: machine.sign_in(PERSONAL_ACCOUNT))
     identity.sign_in(context(machine, session))
-    assert session.console.shown == ["h1.prompt"]
+    assert session.console.shown == ["sign-in.prompt"]
     assert open_calls(machine) == [["-a", "1Password"]]
     assert session.person.enters == 1
     assert PERSONAL_EMAIL in session.lines[0]
 
 
-def test_h1_names_the_failure_and_prompts_again(machine: Machine) -> None:
+def test_sign_in_names_the_failure_and_prompts_again(machine: Machine) -> None:
     session = make_session(lambda: None, lambda: machine.sign_in(PERSONAL_ACCOUNT))
     identity.sign_in(context(machine, session))
-    assert session.console.shown == ["h1.prompt", "step.failed", "h1.prompt"]
-    assert session.text("h1.absent", account=PERSONAL_EMAIL) in session.lines[1]
+    assert session.console.shown == ["sign-in.prompt", "step.failed", "sign-in.prompt"]
+    assert session.text("sign-in.absent", account=PERSONAL_EMAIL) in session.lines[1]
     assert session.person.enters == 2
 
 
-def test_h1_ignores_the_work_account(machine: Machine) -> None:
+def test_sign_in_ignores_the_work_account(machine: Machine) -> None:
     machine.sign_in(WORK_ACCOUNT)
     session = make_session(lambda: machine.sign_in(WORK_ACCOUNT, PERSONAL_ACCOUNT))
     identity.sign_in(context(machine, session))
-    assert session.console.shown == ["h1.prompt"]
+    assert session.console.shown == ["sign-in.prompt"]
 
 
-def test_h1_matches_the_account_by_sign_in_address_as_well(machine: Machine) -> None:
+def test_sign_in_matches_the_account_by_sign_in_address_as_well(machine: Machine) -> None:
     machine.sign_in(PERSONAL_ACCOUNT)
     session = make_session()
     ctx = context(machine, session)
@@ -81,7 +77,7 @@ def test_h1_matches_the_account_by_sign_in_address_as_well(machine: Machine) -> 
     assert session.console.shown == []
 
 
-def test_h1_reports_input_that_ends_instead_of_looping(machine: Machine) -> None:
+def test_sign_in_reports_input_that_ends_instead_of_looping(machine: Machine) -> None:
     session = make_session()
     with pytest.raises(base.InputEnded):
         identity.sign_in(context(machine, session))
@@ -91,7 +87,7 @@ def prepared(machine: Machine) -> None:
     machine.sign_in(PERSONAL_ACCOUNT)
 
 
-def test_h3_is_skipped_silently_when_the_integrations_work(machine: Machine) -> None:
+def test_integrations_is_skipped_silently_when_the_integrations_work(machine: Machine) -> None:
     prepared(machine)
     machine.integrations(on=True)
     session = make_session()
@@ -102,37 +98,43 @@ def test_h3_is_skipped_silently_when_the_integrations_work(machine: Machine) -> 
     assert open_calls(machine) == []
 
 
-def test_h3_opens_the_settings_pane_then_passes(machine: Machine) -> None:
+def test_integrations_opens_the_settings_pane_then_passes(machine: Machine) -> None:
     prepared(machine)
     session = make_session(lambda: machine.integrations(on=True))
     ctx = context(machine, session)
     identity.sign_in(ctx)
     identity.enable_integrations(ctx)
-    assert session.console.shown == ["h3.prompt"]
+    assert session.console.shown == ["integrations.prompt"]
     assert open_calls(machine) == [[identity.SETTINGS_URL]]
 
 
-def test_h3_checks_the_agent_socket_as_well_as_the_vault_listing(machine: Machine) -> None:
+def test_integrations_checks_the_agent_socket_as_well_as_the_vault_listing(
+    machine: Machine,
+) -> None:
     prepared(machine)
     machine.update(lambda world: world.update(integration=True, agent=False))
     session = make_session(lambda: machine.integrations(on=True))
     ctx = context(machine, session)
     identity.sign_in(ctx)
     identity.enable_integrations(ctx)
-    assert session.console.shown == ["h3.prompt"]
+    assert session.console.shown == ["integrations.prompt"]
 
 
-def test_h3_shows_the_cause_and_prompts_again_when_still_failing(machine: Machine) -> None:
+def test_integrations_shows_the_cause_and_prompts_again_when_still_failing(
+    machine: Machine,
+) -> None:
     prepared(machine)
     session = make_session(lambda: None, lambda: machine.integrations(on=True))
     ctx = context(machine, session)
     identity.sign_in(ctx)
     identity.enable_integrations(ctx)
-    assert session.console.shown == ["h3.prompt", "step.failed", "h3.prompt"]
+    assert session.console.shown == ["integrations.prompt", "step.failed", "integrations.prompt"]
     assert "could not list vaults" in session.lines[1]
 
 
-def test_h3_lists_vaults_with_stdin_closed_and_an_explicit_account(machine: Machine) -> None:
+def test_integrations_lists_vaults_with_stdin_closed_and_an_explicit_account(
+    machine: Machine,
+) -> None:
     prepared(machine)
     machine.integrations(on=True)
     ctx = context(machine, make_session())
@@ -154,7 +156,7 @@ def keyed(machine: Machine, session: Session) -> base.Context:
     return ctx
 
 
-def test_h4_is_skipped_silently_when_the_key_already_authenticates(machine: Machine) -> None:
+def test_register_is_skipped_silently_when_the_key_already_authenticates(machine: Machine) -> None:
     session = make_session()
     ctx = keyed(machine, session)
     key = ctx.key_file.read_text(encoding="utf-8").split()[1]
@@ -165,12 +167,12 @@ def test_h4_is_skipped_silently_when_the_key_already_authenticates(machine: Mach
     assert machine.calls("gh") == []
 
 
-def test_h4_prompts_signs_in_registers_then_drops_the_scope(machine: Machine) -> None:
+def test_register_prompts_signs_in_registers_then_drops_the_scope(machine: Machine) -> None:
     session = make_session()
     ctx = keyed(machine, session)
     identity.register_key(ctx)
     gh_calls = machine.calls("gh")
-    assert session.console.shown == ["key.created", "h4.prompt", "register.registered"]
+    assert session.console.shown == ["key.created", "approval.prompt", "register.registered"]
     assert [
         "auth",
         "login",
@@ -197,7 +199,7 @@ def test_h4_prompts_signs_in_registers_then_drops_the_scope(machine: Machine) ->
     assert machine.world["gh"]["scopes"] == []
 
 
-def test_h4_refreshes_a_token_that_lacks_only_the_scope(machine: Machine) -> None:
+def test_register_refreshes_a_token_that_lacks_only_the_scope(machine: Machine) -> None:
     session = make_session()
     ctx = keyed(machine, session)
     machine.update(lambda world: world["gh"].update(logged_in=True, scopes=["repo"]))
@@ -209,17 +211,17 @@ def test_h4_refreshes_a_token_that_lacks_only_the_scope(machine: Machine) -> Non
     assert not any(call[:2] == ["auth", "login"] for call in gh_calls)
 
 
-def test_h4_names_the_failure_and_asks_for_enter_before_retrying(machine: Machine) -> None:
+def test_register_names_the_failure_and_asks_for_enter_before_retrying(machine: Machine) -> None:
     session = make_session(lambda: None)
     ctx = keyed(machine, session)
     machine.update(lambda world: world["gh"].update(login_failures=1))
     identity.register_key(ctx)
     assert session.console.shown == [
         "key.created",
-        "h4.prompt",
+        "approval.prompt",
         "step.failed",
         "step.retry",
-        "h4.prompt",
+        "approval.prompt",
         "register.registered",
     ]
     assert session.person.enters == 1
