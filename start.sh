@@ -31,8 +31,9 @@ set -euo pipefail
 #     /opt/homebrew/bin is added to PATH for the commands it links there.
 # =============================================================================
 
-MISE_VERSION="2026.11.6"
-MISE_SHA256="74cf55e92f6c6b1f166781c36db35db9420a4cbf40d62d85c1b9d5dc76e0ba72"
+# MISE_SHA256 is the macOS arm64 archive's line in the release's SHASUMS256.txt.
+MISE_VERSION="2026.11.7"
+MISE_SHA256="92f1b9f68b6031a9f77938a0ff8dfd7a77fe9cd918c5b09d0ed434f06ebbd3f2"
 PYTHON_VERSION="3.15.2"
 UV_VERSION="0.13.7"
 GH_VERSION="2.103.3"
