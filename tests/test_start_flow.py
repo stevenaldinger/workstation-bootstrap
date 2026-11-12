@@ -37,10 +37,16 @@ class Recorder:
         self.commands: list[list[str]] = []
         self.environments: list[Mapping[str, str]] = []
 
-    def run(self, argv: Sequence[str], env: Mapping[str, str] | None = None) -> base.Completed:
+    def run(
+        self,
+        argv: Sequence[str],
+        env: Mapping[str, str] | None = None,
+        *,
+        timeout: float = base.COMMAND_TIMEOUT_SECONDS,
+    ) -> base.Completed:
         self.commands.append(list(argv))
         self.environments.append(dict(env or {}))
-        return base.run_captured(argv, env)
+        return base.run_captured(argv, env, timeout=timeout)
 
     def stream(self, argv: Sequence[str], env: Mapping[str, str] | None = None) -> int:
         self.commands.append(list(argv))
@@ -206,7 +212,7 @@ def test_a_rerun_on_a_satisfied_machine_prompts_and_changes_nothing(
     }.isdisjoint(session.console.shown)
     assert second.count("op", "item", "create") == 0
     assert second.count("mise", "bootstrap", "packages", "apply") == 0
-    assert second.count("gh") == 0
+    assert second.count("gh") == second.count("gh", "auth", "status")
     assert any("pull" in command for command in second.commands)
 
 
@@ -341,6 +347,38 @@ def test_an_existing_key_item_is_used_not_recreated(machine: Machine) -> None:
     identity.create_key(ctx)
     assert not any(call[:2] == ["item", "create"] for call in machine.calls("op"))
     assert ctx.key_file.read_text(encoding="utf-8") == "ssh-ed25519 AAAAexisting comment\n"
+
+
+def test_a_failed_item_lookup_stops_instead_of_creating_a_second_key(machine: Machine) -> None:
+    satisfied(machine)
+    machine.update(lambda world: world.update(item_list_error="[ERROR] 1Password is locked"))
+    ctx = make_context(machine)
+    identity.sign_in(ctx)
+    with pytest.raises(base.StageError, match="Could not look for the key.*1Password is locked"):
+        identity.create_key(ctx)
+    assert not any(call[:2] == ["item", "create"] for call in machine.calls("op"))
+    assert not ctx.key_file.exists()
+
+
+@pytest.mark.parametrize("output", ["not json", '{"title": "x"}', "[1]", "[{}]"])
+def test_an_unreadable_item_list_is_a_lookup_error_not_a_missing_key(
+    machine: Machine, output: str
+) -> None:
+    satisfied(machine)
+    ctx = make_context(machine)
+    identity.sign_in(ctx)
+    ctx.run = lambda argv, env=None, **kw: base.Completed(0, output, output)
+    with pytest.raises(base.StageError, match="Could not look for the key"):
+        identity.key_item_exists(ctx)
+
+
+def test_an_item_with_a_similar_title_does_not_count_as_the_key(machine: Machine) -> None:
+    satisfied(machine)
+    ctx = make_context(machine)
+    identity.sign_in(ctx)
+    listing = '[{"title": "GitHub SSH (workstation) copy"}, {"title": "other"}]'
+    ctx.run = lambda argv, env=None, **kw: base.Completed(0, listing, listing)
+    assert identity.key_item_exists(ctx) is False
 
 
 def test_the_public_key_falls_back_to_the_item_field(machine: Machine) -> None:

@@ -138,13 +138,28 @@ def ensure_ssh_dir(ctx: Context) -> None:
     ctx.ssh_dir.chmod(SSH_DIR_MODE)
 
 
+def key_item_exists(ctx: Context) -> bool:
+    """Whether the vault already holds the key item; a failed lookup is an error, not "no"."""
+    identity = ctx.config.identity
+    listing = ctx.run(["op", "item", "list", *item_arguments(ctx), "--format", "json"], None)
+
+    def lookup_failed(detail: str) -> StageError:
+        values = {"item": identity.item_title, "vault": identity.vault, "detail": detail}
+        return StageError(MESSAGES["key.lookup-failed"].format(**values))
+
+    if listing.returncode != 0:
+        raise lookup_failed(tail(listing.output) or f"exit {listing.returncode}")
+    try:
+        titles = {str(item["title"]) for item in json.loads(listing.stdout)}
+    except (ValueError, KeyError, TypeError) as error:
+        raise lookup_failed(f"unreadable item list ({error})") from error
+    return identity.item_title in titles
+
+
 def create_key(ctx: Context) -> None:
     """Create the key item and write its public half, each only when missing or different."""
     identity = ctx.config.identity
-    existing = ctx.run(
-        ["op", "item", "get", identity.item_title, *item_arguments(ctx), "--format", "json"], None
-    )
-    if existing.returncode != 0:
+    if not key_item_exists(ctx):
         generate = ["--category", "ssh", "--ssh-generate-key", "ed25519"]
         created = ctx.run(
             ["op", "item", "create", *generate, "--title", identity.item_title]
@@ -230,9 +245,28 @@ def key_is_registered(ctx: Context, key: str) -> bool:
     return listing.returncode == 0 and len(parts) > 1 and parts[1] in listing.output
 
 
+def drop_scope(ctx: Context) -> None:
+    """Remove the key-registration scope from the token when it still holds it.
+
+    The scope is broader than the starter needs, so a token that keeps it stops the run. The
+    check runs on every pass, which lets a repeated run finish a drop that failed earlier.
+    """
+    _, has_scope = token_scopes(ctx)
+    if not has_scope:
+        return
+    dropped = ctx.stream(
+        ["gh", "auth", "refresh", "--hostname", GITHUB_HOST, "--remove-scopes", KEY_SCOPE], None
+    )
+    if dropped != 0:
+        raise StageError(
+            MESSAGES["register.scope-kept"].format(scope=KEY_SCOPE, detail=f"exit {dropped}")
+        )
+
+
 def register_key(ctx: Context) -> None:
     """Make GitHub accept the key: sign in, add it, drop the extra scope, and verify."""
     if handshake(ctx).ok:
+        drop_scope(ctx)
         return
     run_human_step(
         ctx,
@@ -261,11 +295,7 @@ def register_key(ctx: Context) -> None:
         if added.returncode != 0:
             raise StageError(MESSAGES["register.failed"].format(detail=tail(added.output)))
         ctx.console.say("register.registered")
-    dropped = ctx.stream(
-        ["gh", "auth", "refresh", "--hostname", GITHUB_HOST, "--remove-scopes", KEY_SCOPE], None
-    )
-    if dropped != 0:
-        ctx.console.say("register.scope-kept", scope=KEY_SCOPE, detail=f"exit {dropped}")
+    drop_scope(ctx)
     verdict = handshake(ctx)
     if not verdict.ok:
         raise StageError(MESSAGES["register.handshake-failed"].format(detail=verdict.detail))

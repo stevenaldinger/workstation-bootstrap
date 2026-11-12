@@ -1,9 +1,29 @@
-"""Fake `op`, `gh`, `ssh`, `open`, `mise`, `sudo`, and `curl` for tests of the starter.
+"""Fake `op`, `gh`, `ssh`, `open`, `mise`, `sudo`, `curl`, `uname`, and `sw_vers` for starter tests.
 
 Each wrapper script runs `python fake_tools.py <tool> <arguments>`. A fake appends its argument
 vector to `$FAKE_DIR/calls.jsonl` and reads and writes its machine state in
 `$FAKE_DIR/world.json`, so the starter's real command lines run against a model of
 1Password, GitHub, and mise instead of the machine's own tools.
+
+A fake answers only the commands and flags the real tool has and the starter uses. Anything
+else exits 64 with `fake <tool>: unsupported ...`, and a flag the real command lacks exits 1 the
+way the real one does, so a typo in the starter's command line fails a test instead of passing
+against a permissive stand-in. Output formats follow the real producers:
+
+- `op account list --format json` prints url (a sign-in address with no scheme, as in
+  https://developer.1password.com/docs/cli/reference/management-commands/account), email,
+  user_uuid, and account_uuid.
+- `op item create --category ssh --ssh-generate-key ed25519` and the item JSON follow
+  https://developer.1password.com/docs/cli/ssh-keys (the public key is the `public_key` field).
+- `gh auth status` prints a host heading, then `Logged in to <host> account <login> (<source>)`,
+  `Active account`, `Git operations protocol`, `Token`, and `Token scopes` lines
+  (cli/cli v2.103.3, pkg/cmd/auth/status/status.go); with no login it prints
+  "You are not logged into any GitHub hosts." and exits 1.
+- `gh ssh-key list`, when its output is not a terminal, prints tab-separated title, key, added,
+  id, and type (cli/cli v2.103.3, pkg/cmd/ssh-key/list/list.go).
+- `gh auth login`, `gh auth refresh`, and `gh ssh-key add` accept the flags in
+  https://cli.github.com/manual/gh_auth_login, gh_auth_refresh, and gh_ssh-key_add.
+- `mise bootstrap packages status|apply` follow https://mise.jdx.dev/cli/bootstrap/packages.html.
 """
 
 from __future__ import annotations
@@ -20,6 +40,7 @@ FAKE_DIR = Path(os.environ.get("FAKE_DIR", "."))
 WORLD_FILE = FAKE_DIR / "world.json"
 CALLS_FILE = FAKE_DIR / "calls.jsonl"
 GREETING = "Hi stevenaldinger! You've successfully authenticated, but GitHub gives no shell."
+EXIT_UNSUPPORTED = 64
 
 DEFAULT_WORLD: World = {
     "app_accounts": [],
@@ -27,6 +48,7 @@ DEFAULT_WORLD: World = {
     "item": None,
     "read_mode": "read",
     "key_counter": 0,
+    "item_list_error": "",
     "gh": {
         "logged_in": False,
         "scopes": [],
@@ -38,6 +60,28 @@ DEFAULT_WORLD: World = {
     "agent_offers": True,
     "stage1_installed": False,
     "mise_apply_fails": False,
+}
+
+GH_LOGIN_FLAGS = {
+    "--hostname": 1,
+    "-h": 1,
+    "--git-protocol": 1,
+    "-p": 1,
+    "--web": 0,
+    "-w": 0,
+    "--skip-ssh-key": 0,
+    "--scopes": 1,
+    "-s": 1,
+}
+GH_REFRESH_FLAGS = {"--hostname": 1, "-h": 1, "--scopes": 1, "-s": 1, "--remove-scopes": 1, "-r": 1}
+GH_KEY_ADD_FLAGS = {"--title": 1, "-t": 1, "--type": 1}
+OP_ITEM_CREATE_FLAGS = {
+    "--category": 1,
+    "--ssh-generate-key": 1,
+    "--title": 1,
+    "--vault": 1,
+    "--account": 1,
+    "--format": 1,
 }
 
 
@@ -66,9 +110,29 @@ def fail(message: str, code: int = 1) -> int:
     return code
 
 
+def unsupported(tool: str, argv: list[str]) -> int:
+    return fail(f"fake {tool}: unsupported {argv}", EXIT_UNSUPPORTED)
+
+
+def unknown_flag(argv: list[str], allowed: dict[str, int], positionals: int = 0) -> str:
+    """The first flag not in `allowed`, or an empty string; values and positionals are skipped."""
+    index, seen = 0, 0
+    while index < len(argv):
+        word = argv[index]
+        if word in allowed:
+            index += 1 + allowed[word]
+        elif word.startswith("-"):
+            return word
+        else:
+            seen += 1
+            index += 1
+    return "" if seen <= positionals else argv[-1]
+
+
 def matching_account(world: World, wanted: str) -> bool:
     return any(
-        wanted in (a["account_uuid"], a["url"], a["shorthand"]) for a in world["app_accounts"]
+        wanted in (a["account_uuid"], a["url"], a.get("shorthand", ""))
+        for a in world["app_accounts"]
     )
 
 
@@ -82,42 +146,75 @@ def op(argv: list[str], world: World) -> int:
             return fail(f'[ERROR] found no accounts for filter "{account}"')
         if not world["integration"]:
             return fail("[ERROR] You are not currently signed in.")
-        print(json.dumps([{"name": "Private"}]))
+        print(json.dumps([{"id": "vaultid0000000000000000000", "name": "Private"}]))
         return 0
+    return op_item(argv, world)
+
+
+def op_item(argv: list[str], world: World) -> int:
     item = world["item"]
+    if argv[:2] == ["item", "list"]:
+        if world["item_list_error"]:
+            return fail(world["item_list_error"])
+        listed = []
+        if item is not None:
+            listed.append({"id": "itemid00000000000000000000", "title": "GitHub SSH (workstation)"})
+        print(json.dumps(listed))
+        return 0
     if argv[:2] == ["item", "get"]:
         if item is None:
-            return fail('[ERROR] "GitHub SSH (workstation)" isn\'t an item')
+            return fail('[ERROR] "GitHub SSH (workstation)" isn\'t an item in any vault')
         field = {"id": "public_key", "label": "public key", "value": item}
         print(json.dumps({"title": argv[2], "fields": [field]}))
         return 0
     if argv[:2] == ["item", "create"]:
+        bad = unknown_flag(argv[2:], OP_ITEM_CREATE_FLAGS)
+        if bad:
+            return fail(f'[ERROR] unknown flag: "{bad}"')
+        if option(argv, "--category") != "ssh" or option(argv, "--ssh-generate-key") != "ed25519":
+            return fail("[ERROR] the fake creates only a generated Ed25519 SSH key item", 64)
         world["key_counter"] += 1
         world["item"] = f"ssh-ed25519 AAAAC3Fake{world['key_counter']:04d} generated"
         save(world)
-        print(json.dumps({"title": option(argv, "--title")}))
+        print(json.dumps({"id": "itemid00000000000000000000", "title": option(argv, "--title")}))
         return 0
     if argv[0] == "read":
         if item is None or world["read_mode"] != "read":
             return fail("[ERROR] could not read secret: field not found")
         print(item)
         return 0
-    return fail(f"fake op: unsupported {argv}", 64)
+    return unsupported("op", argv)
 
 
 def gh_auth(argv: list[str], world: World) -> int:
     state = world["gh"]
     if argv[0] == "status":
         if not state["logged_in"]:
-            return fail("You are not logged into any GitHub hosts.")
-        scopes = ", ".join(f"'{scope}'" for scope in state["scopes"])
-        print(f"github.com\n  - Token scopes: {scopes}")
+            return fail("You are not logged into any GitHub hosts. To log in, run: gh auth login")
+        scopes = ", ".join(f"'{scope}'" for scope in state["scopes"]) or "none"
+        print("github.com")
+        print("  ✓ Logged in to github.com account stevenaldinger (keyring)")
+        print("  - Active account: true")
+        print("  - Git operations protocol: ssh")
+        print("  - Token: gho_************************************")
+        print(f"  - Token scopes: {scopes}")
         return 0
-    if argv[0] in ("login", "refresh") and "--remove-scopes" in argv:
+    if argv[0] in ("login", "refresh"):
+        allowed = GH_LOGIN_FLAGS if argv[0] == "login" else GH_REFRESH_FLAGS
+        bad = unknown_flag(argv[1:], allowed)
+        if bad:
+            return fail(f"unknown flag: {bad}")
+        return gh_auth_change(argv, world)
+    return unsupported("gh", ["auth", *argv])
+
+
+def gh_auth_change(argv: list[str], world: World) -> int:
+    state = world["gh"]
+    if "--remove-scopes" in argv:
         if state["remove_scope_fails"]:
             return fail("refresh failed")
         state["scopes"] = [s for s in state["scopes"] if s != option(argv, "--remove-scopes")]
-    elif argv[0] in ("login", "refresh"):
+    else:
         if state["login_failures"] > 0:
             state["login_failures"] -= 1
             save(world)
@@ -133,20 +230,26 @@ def gh(argv: list[str], world: World) -> int:
     if argv[0] == "auth":
         return gh_auth(argv[1:], world)
     if argv[:2] == ["ssh-key", "list"]:
-        for key in state["keys"]:
-            print(f"workstation\t{key}\tauthentication\t2026-11-11")
+        for number, key in enumerate(state["keys"], start=1):
+            print(f"workstation\t{key}\t2026-11-11T00:00:00Z\t{number}\tauthentication")
         return 0
     if argv[:2] == ["ssh-key", "add"]:
+        bad = unknown_flag(argv[2:], GH_KEY_ADD_FLAGS, positionals=1)
+        if bad:
+            return fail(f"unknown flag: {bad}")
         if "admin:public_key" not in state["scopes"]:
             return fail("HTTP 404: Not Found (needs admin:public_key)")
         body = Path(argv[2]).read_text(encoding="utf-8").split()[1]
         state["keys"].append(body)
         save(world)
         return 0
-    return fail(f"fake gh: unsupported {argv}", 64)
+    return unsupported("gh", argv)
 
 
 def ssh(argv: list[str], world: World) -> int:
+    """Only the GitHub handshake (`ssh -T ... git@github.com`) is modeled."""
+    if "-T" not in argv or argv[-1] != "git@github.com":
+        return unsupported("ssh", argv)
     pub = option(argv, "-i")
     body = Path(pub).read_text(encoding="utf-8").split()[1] if pub and Path(pub).is_file() else ""
     if body and body in world["gh"]["keys"] and world["agent_offers"]:
@@ -164,7 +267,18 @@ def mise(argv: list[str], world: World) -> int:
         world["stage1_installed"] = True
         save(world)
         return 0
-    return 0
+    if argv[:1] in (["install"], ["exec"]):
+        return 0
+    return unsupported("mise", argv)
+
+
+def open_(argv: list[str], _world: World) -> int:
+    """macOS `open` with an application (`-a NAME`) or a URL; its effects are not modeled."""
+    return 0 if argv and (argv[0] == "-a" or "://" in argv[0]) else unsupported("open", argv)
+
+
+def sudo(argv: list[str], _world: World) -> int:
+    return 0 if argv in (["-v"], ["-n", "true"]) else unsupported("sudo", argv)
 
 
 def curl(argv: list[str], _world: World) -> int:
@@ -177,32 +291,40 @@ def curl(argv: list[str], _world: World) -> int:
     return 0
 
 
-def uname(_argv: list[str], _world: World) -> int:
+def uname(argv: list[str], _world: World) -> int:
+    if argv != ["-m"]:
+        return unsupported("uname", argv)
     print(os.environ["FAKE_ARCH"])
     return 0
 
 
-def sw_vers(_argv: list[str], _world: World) -> int:
+def sw_vers(argv: list[str], _world: World) -> int:
+    if argv != ["-productVersion"]:
+        return unsupported("sw_vers", argv)
     print(os.environ["FAKE_MACOS"])
     return 0
+
+
+HANDLERS = {
+    "op": op,
+    "gh": gh,
+    "ssh": ssh,
+    "mise": mise,
+    "open": open_,
+    "sudo": sudo,
+    "curl": curl,
+    "uname": uname,
+    "sw_vers": sw_vers,
+}
 
 
 def main(tool: str, argv: list[str]) -> int:
     with CALLS_FILE.open("a", encoding="utf-8") as log:
         log.write(json.dumps([tool, *argv, {"stdin_null": stdin_is_null()}]) + "\n")
     world = load() if WORLD_FILE.exists() else {}
-    handlers = {
-        "op": op,
-        "gh": gh,
-        "ssh": ssh,
-        "mise": mise,
-        "curl": curl,
-        "uname": uname,
-        "sw_vers": sw_vers,
-    }
-    if tool in handlers:
-        return handlers[tool](argv, world)
-    return 0
+    if tool not in HANDLERS:
+        return unsupported(tool, argv)
+    return HANDLERS[tool](argv, world)
 
 
 if __name__ == "__main__":

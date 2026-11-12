@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from start_config import StartConfig
 
 AGENT_SOCKET_RELATIVE = Path("Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock")
 TAIL_LINES = 3
+# A captured command (op, gh, git) that has not finished by now is stuck, not slow.
+COMMAND_TIMEOUT_SECONDS = 120.0
+# Cloning the setup repository over a slow link takes longer than a status query.
+CLONE_TIMEOUT_SECONDS = 900.0
+EXIT_TIMED_OUT = 124
+EXIT_NOT_EXECUTABLE = 126
+EXIT_NOT_FOUND = 127
 EXIT_FAILED = 1
 EXIT_INPUT_ENDED = 130
 
@@ -44,7 +52,12 @@ MESSAGES: dict[str, str] = {
     "register.title": "Register the key with GitHub",
     "register.registered": "Registered the key on GitHub.",
     "register.failed": "Registering the key failed: {detail}",
-    "register.scope-kept": "The {scope} scope is still on the GitHub token: {detail}",
+    "register.scope-kept": (
+        "The {scope} scope is still on the GitHub token ({detail}). Remove it with: "
+        "gh auth refresh --hostname github.com --remove-scopes {scope}, then run the same "
+        "command again."
+    ),
+    "key.lookup-failed": "Could not look for the key {item} in the {vault} vault: {detail}",
     "register.handshake-failed": (
         "GitHub did not accept the key: {detail}. Lock and unlock 1Password so its agent offers "
         "the new key, then run the same command again."
@@ -58,6 +71,7 @@ MESSAGES: dict[str, str] = {
     "clone.failed": "Cloning the setup repository failed: {detail}",
     "handoff.title": "Hand off to the walkthrough",
     "handoff.missing": "The cloned repository has no {path}.",
+    "handoff.failed": "Could not start {path} from the cloned repository: {detail}.",
 }
 
 
@@ -78,14 +92,41 @@ class Completed:
     output: str
 
 
-Runner = Callable[[Sequence[str], Mapping[str, str] | None], Completed]
+class Runner(Protocol):
+    """Runs a command with stdin closed, captures its output, and gives up after `timeout`."""
+
+    def __call__(
+        self,
+        argv: Sequence[str],
+        env: Mapping[str, str] | None = None,
+        *,
+        timeout: float = COMMAND_TIMEOUT_SECONDS,
+    ) -> Completed: ...
+
+
 Streamer = Callable[[Sequence[str], Mapping[str, str] | None], int]
 SocketCheck = Callable[[Path], bool]
 Execv = Callable[[str, list[str]], object]
 
 
-def run_captured(argv: Sequence[str], env: Mapping[str, str] | None = None) -> Completed:
-    """Run a command with stdin closed and capture its output; a missing command is status 127."""
+def failed_to_start(argv: Sequence[str], error: OSError) -> tuple[int, str]:
+    """Exit status and message for a command that could not be started."""
+    if isinstance(error, FileNotFoundError):
+        return EXIT_NOT_FOUND, f"{argv[0]}: command not found"
+    return EXIT_NOT_EXECUTABLE, f"{argv[0]}: cannot run: {error.strerror or error}"
+
+
+def run_captured(
+    argv: Sequence[str],
+    env: Mapping[str, str] | None = None,
+    *,
+    timeout: float = COMMAND_TIMEOUT_SECONDS,
+) -> Completed:
+    """Run a command with stdin closed and capture its output.
+
+    A missing command is status 127, one that cannot be run is 126, and one still running after
+    `timeout` seconds is stopped and reported as 124.
+    """
     try:
         proc = subprocess.run(
             list(argv),
@@ -94,20 +135,29 @@ def run_captured(argv: Sequence[str], env: Mapping[str, str] | None = None) -> C
             check=False,
             stdin=subprocess.DEVNULL,
             env=None if env is None else {**os.environ, **env},
+            timeout=timeout,
         )
-    except FileNotFoundError:
-        return Completed(127, "", f"{argv[0]}: command not found")
+    except subprocess.TimeoutExpired:
+        return Completed(EXIT_TIMED_OUT, "", f"{argv[0]}: timed out after {timeout:.0f}s")
+    except OSError as error:
+        code, message = failed_to_start(argv, error)
+        return Completed(code, "", message)
     return Completed(proc.returncode, proc.stdout, proc.stdout + proc.stderr)
 
 
 def run_streamed(argv: Sequence[str], env: Mapping[str, str] | None = None) -> int:
-    """Run a command attached to the terminal and return its exit status."""
+    """Run a command attached to the terminal and return its exit status.
+
+    It has no time limit, because a person may be completing a step in it.
+    """
     try:
         return subprocess.run(
             list(argv), check=False, env=None if env is None else {**os.environ, **env}
         ).returncode
-    except FileNotFoundError:
-        return 127
+    except OSError as error:
+        code, message = failed_to_start(argv, error)
+        print(message, file=sys.stderr)
+        return code
 
 
 class Console:

@@ -6,7 +6,7 @@ import shlex
 from collections.abc import Sequence
 from pathlib import Path
 
-from start_base import MESSAGES, Context, Execv, StageError, tail
+from start_base import CLONE_TIMEOUT_SECONDS, MESSAGES, Context, Execv, StageError, tail
 from start_identity import ssh_options
 
 WS_RELATIVE = Path("bin/ws")
@@ -35,7 +35,7 @@ def clone_repository(ctx: Context, url: str) -> None:
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         command = ["git", "clone", url, str(target)]
-    result = ctx.run(command, environment)
+    result = ctx.run(command, environment, timeout=CLONE_TIMEOUT_SECONDS)
     if result.returncode != 0:
         raise StageError(MESSAGES["clone.failed"].format(detail=tail(result.output)))
     hooks_path = ctx.config.repository.hooks_path
@@ -49,4 +49,10 @@ def hand_off(ctx: Context, extra: Sequence[str], execv: Execv) -> None:
     ws = ctx.clone_dir / WS_RELATIVE
     if not ws.is_file():
         raise StageError(MESSAGES["handoff.missing"].format(path=str(WS_RELATIVE)))
-    execv(str(ws), [str(ws), "bootstrap", *extra])
+    try:
+        execv(str(ws), [str(ws), "bootstrap", *extra])
+    except OSError as error:
+        reason = error.strerror or str(error)
+        raise StageError(
+            MESSAGES["handoff.failed"].format(path=str(WS_RELATIVE), detail=reason)
+        ) from error

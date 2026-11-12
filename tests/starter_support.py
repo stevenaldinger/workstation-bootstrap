@@ -24,14 +24,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 FAKE_TOOLS = Path(fake_tools.__file__).resolve()
 PERSONAL_EMAIL = "owner@example.com"
 PERSONAL_ACCOUNT = {
-    "url": "https://my.example.1password.com",
+    "url": "my.example.1password.com",
     "email": PERSONAL_EMAIL,
     "user_uuid": "USERPERSONAL000000000000000",
     "account_uuid": "ACCOUNTPERSONAL0000000000000",
     "shorthand": "personal",
 }
 WORK_ACCOUNT = {
-    "url": "https://work.example.1password.com",
+    "url": "work.example.1password.com",
     "email": "owner@work.example",
     "user_uuid": "USERWORK0000000000000000000",
     "account_uuid": "ACCOUNTWORK0000000000000000",

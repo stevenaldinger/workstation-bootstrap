@@ -164,7 +164,7 @@ def test_register_is_skipped_silently_when_the_key_already_authenticates(machine
     session.console.shown.clear()
     identity.register_key(ctx)
     assert session.console.shown == []
-    assert machine.calls("gh") == []
+    assert machine.calls("gh") == [["auth", "status", "--hostname", "github.com"]]
 
 
 def test_register_prompts_signs_in_registers_then_drops_the_scope(machine: Machine) -> None:
@@ -242,12 +242,28 @@ def test_an_existing_registration_is_not_added_again(machine: Machine) -> None:
     assert not any(call[:2] == ["ssh-key", "add"] for call in machine.calls("gh"))
 
 
-def test_a_scope_that_cannot_be_dropped_is_reported_but_not_fatal(machine: Machine) -> None:
+def test_a_scope_that_cannot_be_dropped_stops_the_run_with_the_remedy(machine: Machine) -> None:
     session = make_session()
     ctx = keyed(machine, session)
     machine.update(lambda world: world["gh"].update(remove_scope_fails=True))
+    with pytest.raises(base.StageError) as raised:
+        identity.register_key(ctx)
+    message = str(raised.value)
+    assert "admin:public_key" in message
+    assert "gh auth refresh --hostname github.com --remove-scopes admin:public_key" in message
+
+
+def test_a_run_repeated_after_a_kept_scope_finishes_once_it_can_be_dropped(
+    machine: Machine,
+) -> None:
+    ctx = keyed(machine, make_session())
+    machine.update(lambda world: world["gh"].update(remove_scope_fails=True))
+    with pytest.raises(base.StageError):
+        identity.register_key(ctx)
+    machine.update(lambda world: world["gh"].update(remove_scope_fails=False))
     identity.register_key(ctx)
-    assert "register.scope-kept" in session.console.shown
+    assert "admin:public_key" not in machine.world["gh"]["scopes"]
+    assert len(machine.world["gh"]["keys"]) == 1
 
 
 def test_a_rejected_key_names_the_agent_remedy(machine: Machine) -> None:
