@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -13,9 +14,9 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECK_SH = REPO_ROOT / "scripts" / "check.sh"
 
-# Stands in for shellcheck, uv, and gitleaks. It logs its command line and fails when any
-# comma-separated entry of $FAKE_FAIL appears in it, so one stub can fail a single command of
-# a multi-command check.
+# Stands in for shellcheck, uv, gitleaks, pwsh, and docker. It logs its command line and fails
+# when any comma-separated entry of $FAKE_FAIL appears in it, so one stub can fail a single
+# command of a multi-command check.
 STUB = """#!/bin/sh
 echo "$(basename "$0") $*" >> "$FAKE_LOG"
 args="$(basename "$0") $*"
@@ -39,7 +40,7 @@ class Sandbox:
         (root / "tool.sh").write_text("#!/bin/sh\n", encoding="utf-8")
         bin_dir = root / "bin"
         bin_dir.mkdir()
-        for tool in ("shellcheck", "uv", "gitleaks"):
+        for tool in ("shellcheck", "uv", "gitleaks", "pwsh", "docker"):
             stub = bin_dir / tool
             stub.write_text(STUB, encoding="utf-8")
             stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
@@ -97,6 +98,7 @@ def test_all_passes_when_every_check_passes(sandbox: Sandbox) -> None:
         ("gitleaks", "secrets"),
         ("check_commits", "commits"),
         ("check_agent_files", "agent-files"),
+        ("pwsh", "powershell"),
         ("shellcheck,gitleaks", "shellcheck secrets"),
         ("ruff format,pytest -q", "python tests"),
     ],
@@ -116,6 +118,7 @@ def test_all_runs_every_check_and_names_each_failure(
         "pytest",
         "gitleaks",
         "check_commits",
+        "pwsh",
     )
     for tool in tools:
         assert tool in calls, f"{tool} did not run after an earlier failure"
@@ -158,6 +161,39 @@ def test_bash32_refuses_to_run_off_macos(sandbox: Sandbox) -> None:
     assert result.returncode == 1
     assert "macOS" in result.stderr
     assert sandbox.commands() == ""
+
+
+def test_powershell_lints_start_ps1_with_the_local_pwsh(sandbox: Sandbox) -> None:
+    result = sandbox.run("powershell")
+    assert result.returncode == 0, result.stderr
+    calls = sandbox.commands()
+    assert calls.startswith("pwsh -NoProfile -Command")
+    assert (
+        "Invoke-ScriptAnalyzer -Path ./start.ps1 -Settings ./PSScriptAnalyzerSettings.psd1" in calls
+    )
+    assert "docker" not in calls
+
+
+def test_powershell_uses_the_pinned_container_image_when_pwsh_is_missing(sandbox: Sandbox) -> None:
+    (sandbox.root / "bin" / "pwsh").unlink()
+    result = sandbox.run("powershell")
+    assert result.returncode == 0, result.stderr
+    call = sandbox.commands()
+    assert call.startswith("docker run --rm --platform linux/amd64 -v ")
+    assert re.search(r"mcr\.microsoft\.com/powershell@sha256:[0-9a-f]{64} pwsh", call)
+
+
+def test_windows_refuses_to_run_off_windows(sandbox: Sandbox) -> None:
+    result = sandbox.run("windows", system="Linux")
+    assert result.returncode == 1
+    assert "runs on Windows" in result.stderr
+    assert sandbox.commands() == ""
+
+
+def test_windows_runs_the_windows_starter_tests_and_refuses_to_skip_them(sandbox: Sandbox) -> None:
+    result = sandbox.run("windows", system="MINGW64_NT-10.0-26100")
+    assert result.returncode == 0, result.stderr
+    assert "pytest -q tests/test_start_windows.py tests/test_start_ps1.py" in sandbox.commands()
 
 
 def test_all_does_not_include_the_macos_only_check(sandbox: Sandbox) -> None:

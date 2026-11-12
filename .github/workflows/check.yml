@@ -27,6 +27,10 @@ jobs:
           # start.sh must run under the 3.2 bash that macOS ships, which Linux runners lack.
           - os: macos-latest
             target: bash32
+          # start.ps1 and the Windows host steps run under Windows PowerShell 5.1, which only
+          # Windows runners have.
+          - os: windows-2025
+            target: windows
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -41,6 +45,8 @@ jobs:
           version: 2026.11.7
 
       - name: Run the checks for this runner
+        # Git Bash on the Windows runner, so one command line works on every runner.
+        shell: bash
         env:
           # The commit before the new commits: a push's previous head, or a pull request's base.
           CHECK_BASE_SHA: ${{ github.event.before || github.event.pull_request.base.sha }}

@@ -15,7 +15,9 @@ set -euo pipefail
 #   scripts/check.sh secrets       # Scan the full Git history with gitleaks
 #   scripts/check.sh commits       # Validate commit messages (CHECK_BASE_SHA bounds the range)
 #   scripts/check.sh agent-files   # Validate the agent instruction files
+#   scripts/check.sh powershell    # Lint start.ps1 with PSScriptAnalyzer
 #   scripts/check.sh bash32        # Run the start.sh sandbox tests (macOS only)
+#   scripts/check.sh windows       # Run the Windows starter tests (Windows only)
 #   scripts/check.sh -h            # Show help
 #
 # What it does:
@@ -28,6 +30,9 @@ set -euo pipefail
 #     project or lock file; tool settings live in pyproject.toml.
 #   - `bash32` is separate from `all` because it only means something on macOS, where
 #     /bin/bash is the 3.2 that start.sh must run under; the macOS CI job runs it.
+#   - `powershell` runs the local pwsh when there is one, and otherwise the pinned PowerShell
+#     container image, so a Mac needs only Docker. PSScriptAnalyzer is pinned the same way.
+#   - `windows` is separate from `all` for the same reason as `bash32`: the Windows job runs it.
 #   - CHECK_BASE_SHA is the commit before the pushed range. CI passes the push's `before`
 #     commit; without it, the commits check uses the recorded base.
 # =============================================================================
@@ -35,13 +40,15 @@ set -euo pipefail
 PYTEST_VERSION="9.2.0"
 RUFF_VERSION="0.17.4"
 MYPY_VERSION="2.4.1"
-ALL_CHECKS=(shellcheck python tests secrets commits agent-files)
+PSSA_VERSION="1.25.0"
+POWERSHELL_IMAGE="mcr.microsoft.com/powershell@sha256:042240d57ec9e47e511033b92625a8d95875ee5860af3015992c248b58a8be81"
+ALL_CHECKS=(shellcheck python tests secrets commits agent-files powershell)
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 show_help() {
   cat <<EOF
-Usage: $(basename "$0") [shellcheck|python|tests|secrets|commits|agent-files|bash32|all]
+Usage: $(basename "$0") [shellcheck|python|tests|secrets|commits|agent-files|powershell|bash32|windows|all]
 
 Runs the repository checks. With no argument, runs every check and reports each failure.
 
@@ -97,6 +104,42 @@ run_agent_files() {
   (cd "${REPO_ROOT}" && uv run --no-project scripts/check_agent_files.py)
 }
 
+# PSScriptAnalyzer must report nothing for start.ps1 under PSScriptAnalyzerSettings.psd1.
+run_powershell() {
+  local analyze
+  analyze="$(
+    cat <<'POWERSHELL'
+$ErrorActionPreference = "Stop"
+$version = $env:PSSA_VERSION
+if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object Version -eq $version)) {
+  Install-Module -Name PSScriptAnalyzer -RequiredVersion $version -Repository PSGallery -Scope CurrentUser -Force
+}
+Import-Module PSScriptAnalyzer -RequiredVersion $version
+$found = @(Invoke-ScriptAnalyzer -Path ./start.ps1 -Settings ./PSScriptAnalyzerSettings.psd1)
+$found | Format-List RuleName, Severity, Line, Message
+if ($found.Count -gt 0) { exit 1 }
+Write-Output "PSScriptAnalyzer: start.ps1 is clean"
+POWERSHELL
+  )"
+  if command -v pwsh >/dev/null 2>&1; then
+    (cd "${REPO_ROOT}" && PSSA_VERSION="${PSSA_VERSION}" pwsh -NoProfile -Command "${analyze}")
+  else
+    docker run --rm --platform linux/amd64 -v "${REPO_ROOT}:/repo:ro" -w /repo \
+      -e "PSSA_VERSION=${PSSA_VERSION}" "${POWERSHELL_IMAGE}" pwsh -NoProfile -Command "${analyze}"
+  fi
+}
+
+run_windows() {
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) ;;
+    *)
+      echo "error: windows runs on Windows, where the starter tests use the real registry and commands" >&2
+      return 1
+      ;;
+  esac
+  (cd "${REPO_ROOT}" && WS_REQUIRE_WINDOWS=1 uv run --no-project --with "pytest==${PYTEST_VERSION}" pytest -q tests/test_start_windows.py tests/test_start_ps1.py)
+}
+
 run_bash32() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "error: bash32 runs on macOS, where /bin/bash is bash 3.2" >&2
@@ -113,7 +156,9 @@ run_named() {
     secrets) run_secrets ;;
     commits) run_commits ;;
     agent-files) run_agent_files ;;
+    powershell) run_powershell ;;
     bash32) run_bash32 ;;
+    windows) run_windows ;;
     *) return 2 ;;
   esac
 }
@@ -143,11 +188,11 @@ main() {
     all)
       run_all
       ;;
-    shellcheck | python | tests | secrets | commits | agent-files | bash32)
+    shellcheck | python | tests | secrets | commits | agent-files | powershell | bash32 | windows)
       run_named "${target}"
       ;;
     *)
-      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|commits|agent-files|bash32|all]" >&2
+      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|commits|agent-files|powershell|bash32|windows|all]" >&2
       return 2
       ;;
   esac
