@@ -6,7 +6,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
-  cancel-in-progress: true
+  # A pushed range is validated only by its own run, so only pull request runs may be cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -30,4 +31,7 @@ jobs:
           version: 2026.11.6
 
       - name: Run every check
+        env:
+          # The commit before the new commits: a push's previous head, or a pull request's base.
+          CHECK_BASE_SHA: ${{ github.event.before || github.event.pull_request.base.sha }}
         run: scripts/check.sh

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# commit-msg: rejects a commit message that is not a Conventional Commit.
+#
+# Enable it once per clone with: git config core.hooksPath .githooks
+# Every rule lives in scripts/check_commits.py, which CI also runs over pushed commits.
+# Docs: README.md, section "Commit messages"
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "error: uv is required to check the commit message; run mise install" >&2
+  exit 2
+fi
+
+exec uv run --no-project "${REPO_ROOT}/scripts/check_commits.py" --message-file "$1"

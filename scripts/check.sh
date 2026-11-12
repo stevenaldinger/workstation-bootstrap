@@ -13,6 +13,7 @@ set -euo pipefail
 #   scripts/check.sh python        # ruff, ruff format, and mypy through uv
 #   scripts/check.sh tests         # Run the pytest suite through uv
 #   scripts/check.sh secrets       # Scan the full Git history with gitleaks
+#   scripts/check.sh commits       # Validate commit messages (CHECK_BASE_SHA bounds the range)
 #   scripts/check.sh -h            # Show help
 #
 # What it does:
@@ -23,23 +24,28 @@ set -euo pipefail
 #   - shellcheck, uv, and gitleaks come from the path; mise.toml pins them.
 #   - The ruff, mypy, and pytest versions are pinned here, so Python checks need no
 #     project or lock file; tool settings live in pyproject.toml.
+#   - CHECK_BASE_SHA is the commit before the pushed range. CI passes the push's `before`
+#     commit; without it, the commits check uses the recorded base.
 # =============================================================================
 
 PYTEST_VERSION="9.2.0"
 RUFF_VERSION="0.17.4"
 MYPY_VERSION="2.4.1"
-ALL_CHECKS=(shellcheck python tests secrets)
+ALL_CHECKS=(shellcheck python tests secrets commits)
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 show_help() {
   cat <<EOF
-Usage: $(basename "$0") [shellcheck|python|tests|secrets|all]
+Usage: $(basename "$0") [shellcheck|python|tests|secrets|commits|all]
 
 Runs the repository checks. With no argument, runs every check and reports each failure.
 
 Options:
   -h, --help    Show this help message and exit
+
+Environment Variables:
+  CHECK_BASE_SHA    Commit before the range the commits check enforces
 EOF
 }
 
@@ -75,12 +81,21 @@ run_secrets() {
   (cd "${REPO_ROOT}" && gitleaks git . --redact --no-banner --config .gitleaks.toml)
 }
 
+run_commits() {
+  local args=()
+  if [[ -n "${CHECK_BASE_SHA:-}" ]]; then
+    args+=(--base "${CHECK_BASE_SHA}")
+  fi
+  (cd "${REPO_ROOT}" && uv run --no-project scripts/check_commits.py ${args[@]+"${args[@]}"})
+}
+
 run_named() {
   case "$1" in
     shellcheck) run_shellcheck ;;
     python) run_python ;;
     tests) run_tests ;;
     secrets) run_secrets ;;
+    commits) run_commits ;;
     *) return 2 ;;
   esac
 }
@@ -110,11 +125,11 @@ main() {
     all)
       run_all
       ;;
-    shellcheck | python | tests | secrets)
+    shellcheck | python | tests | secrets | commits)
       run_named "${target}"
       ;;
     *)
-      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|all]" >&2
+      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|commits|all]" >&2
       return 2
       ;;
   esac

@@ -126,6 +126,24 @@ scripts/check.sh
 
 `mise install` reads `mise.toml` and installs the pinned gitleaks, Python, shellcheck, and uv. Ruff, mypy, and pytest versions are pinned in `scripts/check.sh` and run through `uv run --no-project`.
 
+## Commit messages
+
+Every commit message is a Conventional Commit:
+
+```text
+type(scope): imperative lowercase summary
+
+Body that explains why, wrapped at 72 characters.
+```
+
+The type is one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, or `revert`. The scope is required, the header is at most 72 characters with no trailing period, and no AI or session attribution trailer appears. Enable the `commit-msg` hook once per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+`scripts/check.sh commits` runs the same rules over history. Commits up to the one recorded in `scripts/commit-lint-base.txt` only produce warnings; later commits fail the check. CI passes the commit before the pushed range as `CHECK_BASE_SHA`, which replaces the recorded base.
+
 ## Agent instructions
 
 Claude Code reads `AGENTS.md` and the `change-starter` skill under `.claude/skills/`; there is no `CLAUDE.md`, and no skill is a symlink, because either one breaks how Claude Code loads them. The skill covers the checks above, the release flow, and the hand-off of the new pin to the private repository. The private repository's `ws check --online` verifies these files at the commit its README pins.

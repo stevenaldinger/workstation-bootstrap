@@ -55,6 +55,8 @@ class Sandbox:
             "FAKE_FAIL": fail,
             "HOME": str(self.root),
         }
+        if "CHECK_BASE_SHA" in os.environ:
+            env["CHECK_BASE_SHA"] = os.environ["CHECK_BASE_SHA"]
         return subprocess.run(
             [str(self.root / "scripts" / "check.sh"), *args],
             capture_output=True,
@@ -87,6 +89,7 @@ def test_all_passes_when_every_check_passes(sandbox: Sandbox) -> None:
         ("mypy", "python"),
         ("pytest -q", "tests"),
         ("gitleaks", "secrets"),
+        ("check_commits", "commits"),
         ("shellcheck,gitleaks", "shellcheck secrets"),
         ("ruff format,pytest -q", "python tests"),
     ],
@@ -98,7 +101,16 @@ def test_all_runs_every_check_and_names_each_failure(
     assert result.returncode == 1
     assert f"FAILED: {failed_checks}" in result.stderr
     calls = sandbox.commands()
-    for tool in ("shellcheck", "ruff check", "ruff format", "mypy", "pytest", "gitleaks"):
+    tools = (
+        "shellcheck",
+        "ruff check",
+        "ruff format",
+        "mypy",
+        "pytest",
+        "gitleaks",
+        "check_commits",
+    )
+    for tool in tools:
         assert tool in calls, f"{tool} did not run after an earlier failure"
 
 
@@ -110,6 +122,22 @@ def test_the_python_check_runs_all_three_commands_after_the_first_fails(
     calls = sandbox.commands()
     assert "ruff format --check" in calls
     assert "mypy" in calls
+
+
+def test_the_commits_check_receives_the_base_sha_from_the_environment(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CHECK_BASE_SHA", "abc123")
+    assert sandbox.run("commits").returncode == 0
+    assert "check_commits.py --base abc123" in sandbox.commands()
+
+
+def test_the_commits_check_runs_without_a_base_when_none_is_given(
+    sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CHECK_BASE_SHA", raising=False)
+    assert sandbox.run("commits").returncode == 0
+    assert "--base" not in sandbox.commands()
 
 
 def test_a_single_target_runs_only_that_check(sandbox: Sandbox) -> None:

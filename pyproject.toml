@@ -13,7 +13,15 @@ quote-style = "double"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["prove.py", "start.py", "start_base.py", "start_identity.py", "prove_engine", "tests"]
+files = [
+    "prove.py",
+    "start.py",
+    "start_base.py",
+    "start_identity.py",
+    "prove_engine",
+    "scripts",
+    "tests",
+]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "scripts"]

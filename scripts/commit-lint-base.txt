@@ -1,0 +1,2 @@
+# Commits up to and including this one predate Conventional Commits and are report-only.
+ffa6aba0754c74952c4bee93943b247ed4025705
