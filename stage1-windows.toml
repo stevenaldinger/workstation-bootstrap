@@ -1,0 +1,8 @@
+# Packages the Windows starter installs before anything else: the password manager app and its
+# command line, then Git for the clone. The GitHub CLI comes from start.ps1, pinned by version.
+# Each version is the one the winget catalog holds; winget refuses a version it does not list.
+# `mise bootstrap packages apply` reads this file as its only configuration.
+[bootstrap.packages]
+"winget:AgileBits.1Password"     = { version = "8.12.44.33", os = ["windows"] }  # purpose: password manager app and SSH agent
+"winget:AgileBits.1Password.CLI" = { version = "2.42.0", os = ["windows"] }      # purpose: 1Password command line, authorized by the app
+"winget:Git.Git"                 = { version = "2.56.0.4", os = ["windows"] }    # purpose: clones the setup repository

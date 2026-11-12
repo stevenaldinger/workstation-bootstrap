@@ -24,6 +24,19 @@ against a permissive stand-in. Output formats follow the real producers:
 - `gh auth login`, `gh auth refresh`, and `gh ssh-key add` accept the flags in
   https://cli.github.com/manual/gh_auth_login, gh_auth_refresh, and gh_ssh-key_add.
 - `mise bootstrap packages status|apply` follow https://mise.jdx.dev/cli/bootstrap/packages.html.
+- `wsl.exe --status` and `wsl.exe --install --no-distribution` follow
+  https://learn.microsoft.com/windows/wsl/basic-commands; installing needs elevation, and an
+  exit status of 3010 (ERROR_SUCCESS_REBOOT_REQUIRED) means a restart is required.
+- `shutdown.exe /r /t <seconds> /c <comment>` follows
+  https://learn.microsoft.com/windows-server/administration/windows-commands/shutdown; the
+  comment is at most 512 characters.
+- `sc.exe query|qc <service>` prints the STATE and START_TYPE lines as sc.exe does, and exits
+  1060 for a service that is not installed.
+- `ssh-add.exe -l` exits 0 with a key line, 1 with "The agent has no identities.", and 2 when
+  the agent cannot be reached (ssh-add(1)).
+- `powershell.exe -NoProfile -Command <script>` runs only the three scripts the starter sends;
+  `Start-Process ... -Verb RunAs` runs its target with elevation, and a declined approval
+  fails with "The operation was canceled by the user."
 """
 
 from __future__ import annotations
@@ -31,6 +44,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -43,8 +57,12 @@ WORLD_FILE = FAKE_DIR / "world.json"
 CALLS_FILE = FAKE_DIR / "calls.jsonl"
 GREETING = "Hi stevenaldinger! You've successfully authenticated, but GitHub gives no shell."
 EXIT_UNSUPPORTED = 64
+EXIT_REBOOT_REQUIRED = 3010
+SHUTDOWN_COMMENT_LIMIT = 512
+# Set while a command runs as the target of an elevated Start-Process.
+ELEVATED = {"on": False}
 # Environment variables a call records, so tests can see what a command ran with.
-LOGGED_ENV = ("MISE_YES", "PATH")
+LOGGED_ENV = ("MISE_YES", "PATH", "WSL_UTF8")
 
 DEFAULT_WORLD: World = {
     "app_accounts": [],
@@ -62,6 +80,11 @@ DEFAULT_WORLD: World = {
     },
     "agent": False,
     "agent_offers": True,
+    "wsl": {"installed": False, "install_exit": 0},
+    "vm_platform": "Unknown",
+    "uac": "approve",
+    "shutdowns": [],
+    "agent_service": {"present": True, "running": False, "start_type": "DEMAND_START"},
     "stage1_installed": False,
     "mise_apply_fails": False,
 }
@@ -91,6 +114,16 @@ OP_ITEM_CREATE_FLAGS = {
 
 def stdin_is_null() -> bool:
     """Whether standard input is the null device, as it is when the caller closes stdin."""
+    if sys.platform == "win32":
+        import ctypes
+        import msvcrt
+
+        handle = msvcrt.get_osfhandle(0)  # type: ignore[attr-defined,unused-ignore]
+        kernel = ctypes.windll.kernel32  # type: ignore[attr-defined,unused-ignore]
+        is_character_device = kernel.GetFileType(handle) == 2
+        return bool(
+            is_character_device and not kernel.GetConsoleMode(handle, ctypes.byref(ctypes.c_uint()))
+        )
     try:
         return os.fstat(0).st_rdev == os.stat(os.devnull).st_rdev
     except OSError:
@@ -349,6 +382,111 @@ def sw_vers(argv: list[str], _world: World) -> int:
     return 0
 
 
+def wsl(argv: list[str], world: World) -> int:
+    state = world["wsl"]
+    if argv == ["--status"]:
+        if not state["installed"]:
+            return fail("The Windows Subsystem for Linux is not installed.")
+        print("Default Version: 2")
+        return 0
+    if argv[:1] == ["--install"]:
+        bad = unknown_flag(argv[1:], {"--no-distribution": 0})
+        if bad or "--no-distribution" not in argv:
+            return fail(f"Invalid command line option: {bad or argv}")
+        if not ELEVATED["on"]:
+            return fail("Elevated administrator rights are required.")
+        state["installed"] = True
+        save(world)
+        return int(state["install_exit"])
+    return unsupported("wsl", argv)
+
+
+def shutdown(argv: list[str], world: World) -> int:
+    allowed = {"/r": 0, "/t": 1, "/c": 1}
+    if "/r" not in argv or unknown_flag(argv, allowed):
+        return fail("The system could not be shut down: invalid arguments.")
+    seconds, comment = option(argv, "/t"), option(argv, "/c")
+    if not seconds.isdigit() or len(comment) > SHUTDOWN_COMMENT_LIMIT:
+        return fail("The system could not be shut down: invalid arguments.")
+    world["shutdowns"].append({"seconds": int(seconds), "comment": comment})
+    save(world)
+    return 0
+
+
+def sc(argv: list[str], world: World) -> int:
+    service = world["agent_service"]
+    if len(argv) != 2 or argv[0] not in ("query", "qc") or argv[1] != "ssh-agent":
+        return unsupported("sc", argv)
+    if not service["present"]:
+        print("[SC] EnumQueryServicesStatus:OpenService FAILED 1060:")
+        print("The specified service does not exist as an installed service.")
+        return 1060
+    if argv[0] == "query":
+        code, name = (4, "RUNNING") if service["running"] else (1, "STOPPED")
+        print("SERVICE_NAME: ssh-agent")
+        print(f"        STATE              : {code}  {name}")
+        return 0
+    codes = {"AUTO_START": 2, "DEMAND_START": 3, "DISABLED": 4}
+    print("[SC] QueryServiceConfig SUCCESS")
+    print("SERVICE_NAME: ssh-agent")
+    print(f"        START_TYPE         : {codes[service['start_type']]}   {service['start_type']}")
+    return 0
+
+
+def ssh_add(argv: list[str], world: World) -> int:
+    if argv != ["-l"]:
+        return unsupported("ssh-add", argv)
+    if not world["agent"]:
+        print("The agent has no identities.")
+        return 1
+    print("256 SHA256:AAAAfakefingerprint GitHub SSH (workstation) (ED25519)")
+    return 0
+
+
+def cmd(argv: list[str], _world: World) -> int:
+    """`cmd.exe /c start "" <url>`, which opens a protocol handler; its effects are not modeled."""
+    if len(argv) == 4 and argv[:3] == ["/c", "start", ""] and "://" in argv[3]:
+        return 0
+    return unsupported("cmd", argv)
+
+
+def powershell(argv: list[str], world: World) -> int:
+    if len(argv) != 3 or argv[:2] != ["-NoProfile", "-Command"]:
+        return unsupported("powershell", argv)
+    script = argv[2]
+    started = re.fullmatch(
+        r"Start-Process -FilePath '(?P<exe>(?:[^']|'')*)' -ArgumentList @\((?P<args>.*)\) "
+        r"-Verb RunAs -Wait -PassThru \| ForEach-Object ExitCode",
+        script,
+    )
+    if started:
+        if world["uac"] != "approve":
+            return fail(
+                "Start-Process : This command cannot be run due to the error: "
+                "The operation was canceled by the user."
+            )
+        quoted = re.findall(r"'((?:[^']|'')*)'", started["args"])
+        target = [text.replace("''", "'") for text in quoted]
+        exe = Path(started["exe"].replace("''", "'")).name.removesuffix(".exe")
+        ELEVATED["on"] = True
+        try:
+            code = HANDLERS[exe](shlex.split(" ".join(target)), load())
+        finally:
+            ELEVATED["on"] = False
+        print(code)
+        return 0
+    if "VirtualMachinePlatform" in script:
+        print(world["vm_platform"])
+        return 0
+    if script == "Set-Service ssh-agent -StartupType Disabled; Stop-Service ssh-agent -Force":
+        if not ELEVATED["on"]:
+            return fail("Set-Service : Access is denied.")
+        world["agent_service"].update(running=False, start_type="DISABLED")
+        save(world)
+        return 0
+    return unsupported("powershell", argv)
+
+
 HANDLERS = {
     "op": op,
     "gh": gh,
@@ -359,6 +497,12 @@ HANDLERS = {
     "curl": curl,
     "uname": uname,
     "sw_vers": sw_vers,
+    "wsl": wsl,
+    "shutdown": shutdown,
+    "sc": sc,
+    "ssh-add": ssh_add,
+    "cmd": cmd,
+    "powershell": powershell,
 }
 
 

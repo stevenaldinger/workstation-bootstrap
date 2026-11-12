@@ -23,6 +23,7 @@ EXIT_TIMED_OUT = 124
 EXIT_NOT_EXECUTABLE = 126
 EXIT_NOT_FOUND = 127
 EXIT_FAILED = 1
+EXIT_RESTART_DECLINED = 4
 EXIT_INPUT_ENDED = 130
 
 MESSAGES: dict[str, str] = {
@@ -73,6 +74,57 @@ MESSAGES: dict[str, str] = {
     "handoff.title": "Hand off to the walkthrough",
     "handoff.missing": "The cloned repository has no {path}.",
     "handoff.failed": "Could not start {path} from the cloned repository: {detail}.",
+    "stage1.notice-windows": (
+        "The 1Password and Git installers will each ask Windows for administrator approval, "
+        "because they install for every user. Approve them when the prompts appear."
+    ),
+    "integrations.prompt-windows": (
+        "In the 1Password developer settings that just opened, turn on 'Integrate with "
+        "1Password CLI' and 'Use the SSH agent'. If Windows Hello is off in the Security "
+        "settings, turn it on there. Then press Enter."
+    ),
+    "integrations.agent-missing": "the 1Password SSH agent offered no key: {detail}",
+    "wsl.title": "Turn on Windows Subsystem for Linux",
+    "wsl.reason": (
+        "Windows Subsystem for Linux is not turned on. Windows will ask for administrator "
+        "approval to turn it on; approve it so Ubuntu can be installed later."
+    ),
+    "wsl.failed": (
+        "Windows Subsystem for Linux is still not working after it was turned on: {detail}"
+    ),
+    "agent.title": "Free the SSH agent pipe for 1Password",
+    "agent.reason": (
+        "The Windows OpenSSH Authentication Agent service holds the pipe that 1Password's SSH "
+        "agent needs. Windows will ask for administrator approval to stop and disable it."
+    ),
+    "agent.failed": (
+        "The OpenSSH Authentication Agent service is still running or enabled: {detail}"
+    ),
+    "agent.client-missing": (
+        "The Windows OpenSSH client is missing at {path}. Turn on Settings > System > "
+        "Optional features > OpenSSH Client, then run the same command again."
+    ),
+    "elevate.cancelled": (
+        "Administrator approval was declined, so {step} did not run. Run the same command "
+        "again and approve the prompt."
+    ),
+    "elevate.failed": "{step} failed with exit status {code}: {detail}",
+    "restart.needed": "Windows needs a restart before the setup can continue: {why}.",
+    "restart.why-enable": "turning on Windows Subsystem for Linux changed system components",
+    "restart.why-pending": "a restart is already pending",
+    "restart.question": "How do you want to continue?",
+    "restart.now": "Restart now (recommended). The setup resumes by itself when you sign in.",
+    "restart.later": "Not now. Restart later, then run the same command again.",
+    "restart.scheduled": (
+        "Restarting in {seconds} seconds. After you sign in, the setup resumes by itself; if "
+        "it does not, run the same command again."
+    ),
+    "restart.comment": "workstation-setup resumes after you sign in",
+    "restart.declined": "Restart the computer, then run the same command again to continue.",
+    "restart.too-long": (
+        "The command that resumes the setup is {length} characters, over the {limit} Windows "
+        "allows. Use a shorter --personal-account value or run the setup from a shorter path."
+    ),
 }
 
 
@@ -82,6 +134,15 @@ class StageError(Exception):
 
 class InputEnded(Exception):
     """Standard input closed while a step was waiting for Enter."""
+
+
+class EarlyExit(Exception):
+    """A step ended the run on purpose: print `message` and exit with `status`."""
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
 
 
 @dataclass(frozen=True)

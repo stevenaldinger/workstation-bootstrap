@@ -19,7 +19,7 @@ set -euo pipefail
 #   scripts/pins.sh show       # Print the commit and checksum for the bootstrap command
 # =============================================================================
 
-STARTER_FILES=(start.py start_base.py start_clone.py start_config.py start_identity.py start_packages.py start.toml github_known_hosts stage1.toml)
+STARTER_FILES=(start.py start_base.py start_clone.py start_config.py start_identity.py start_packages.py start_windows.py start.toml github_known_hosts stage1.toml stage1-windows.toml)
 MANIFEST="start.sha256"
 SCRIPT="start.sh"
 

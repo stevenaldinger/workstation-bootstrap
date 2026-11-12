@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Stage 1 of the workstation bootstrap: tools, SSH identity, clone, and hand-off.
 
-`start.sh` installs a pinned mise, then Python, uv, and the GitHub CLI through it, and runs
-this file under that Python. Standard library only. Each step checks the machine first and
-does nothing when its check already passes, so a re-run resumes at the first step that is not
-yet satisfied. Steps that need a person (signing in to 1Password, turning on its integrations,
-approving GitHub) run only when their check fails: the walkthrough opens the app or pane,
-states the action, waits for Enter, checks again, and repeats until the check passes.
+`start.sh` on a Mac, or `start.ps1` on Windows, installs a pinned mise, then Python, uv, and
+the GitHub CLI through it, and runs this file under that Python. Standard library only. Each
+step checks the machine first and does nothing when its check already passes, so a re-run
+resumes at the first step that is not yet satisfied. Steps that need a person (signing in to
+1Password, turning on its integrations, approving GitHub) run only when their check fails: the
+walkthrough opens the app or pane, states the action, waits for Enter, checks again, and
+repeats until the check passes.
 
     python start.py --personal-account <email or sign-in address> [--stage1 stage1.toml]
 
@@ -18,7 +19,10 @@ The modules sit side by side, not in a package, because `start.sh` downloads exa
 listed in `start.sha256` into one folder and runs this file from it, so Python finds its
 siblings there. `start_base.py` holds the shared plumbing, `start_config.py` loads
 `start.toml`, `start_packages.py` installs the stage-1 packages, `start_identity.py` holds the
-identity steps, and `start_clone.py` clones and hands off.
+identity steps, `start_clone.py` clones and hands off, and `start_windows.py` holds the
+Windows host's own steps: WSL, the restart, elevation, and the SSH agent service. The
+`WS_KEEP_SSH_AGENT_SERVICE=1` environment variable keeps that service running; the clean-machine
+proof sets it because its stand-in SSH agent is that service.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ from start_base import (
     MESSAGES,
     Console,
     Context,
+    EarlyExit,
     Execv,
     InputEnded,
     NamedStep,
@@ -145,6 +150,9 @@ def main(
     except StageError as error:
         print(error, file=sys.stderr)
         return EXIT_FAILED
+    except EarlyExit as stop:
+        print(stop.message, file=sys.stderr if stop.status else sys.stdout)
+        return stop.status
     except InputEnded:
         ctx.console.say("input.ended", step=title)
         return EXIT_INPUT_ENDED
