@@ -197,7 +197,7 @@ def gh_auth(argv: list[str], world: World) -> int:
             return fail("You are not logged into any GitHub hosts. To log in, run: gh auth login")
         scopes = ", ".join(f"'{scope}'" for scope in state["scopes"]) or "none"
         print("github.com")
-        print("  ✓ Logged in to github.com account stevenaldinger (keyring)")
+        print("  \u2713 Logged in to github.com account stevenaldinger (keyring)")
         print("  - Active account: true")
         print("  - Git operations protocol: ssh")
         print("  - Token: gho_************************************")

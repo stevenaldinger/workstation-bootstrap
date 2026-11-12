@@ -83,7 +83,7 @@ def test_a_symlink_under_claude_is_rejected(tmp_path: Path, kind: str) -> None:
 @pytest.mark.parametrize(
     "line",
     [
-        "Edit /Users/someone/project/start.py.",
+        "Edit /home/someone/project/start.py.",
         "Open `/etc/hosts`.",
         "Run /bin/bash start.sh.",
         "(see /opt/homebrew/bin/brew)",
@@ -116,7 +116,7 @@ def test_project_relative_references_in_a_skill_pass(tmp_path: Path, line: str) 
 
 
 def test_every_problem_is_reported_in_one_run(tmp_path: Path) -> None:
-    root = build(tmp_path, "Edit /Users/x/y and ../z")
+    root = build(tmp_path, "Edit /home/x/y and ../z")
     (root / "CLAUDE.md").write_text("x\n", encoding="utf-8")
     (root / ".claude" / "link").symlink_to("AGENTS.md")
     assert len(check_agent_files.check(root)) >= 4
@@ -202,7 +202,7 @@ def test_an_absolute_path_in_an_agent_file_is_rejected(tmp_path: Path) -> None:
     root = build(tmp_path)
     default_agent(root)
     agent = root / ".claude" / "agents" / "maintainer.md"
-    agent.write_text(agent.read_text(encoding="utf-8") + "Edit /Users/x/y.\n", encoding="utf-8")
+    agent.write_text(agent.read_text(encoding="utf-8") + "Edit /home/x/y.\n", encoding="utf-8")
     assert any(
         "agents/maintainer.md" in p and "absolute path" in p for p in check_agent_files.check(root)
     )
