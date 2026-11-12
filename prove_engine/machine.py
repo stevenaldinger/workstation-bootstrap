@@ -1,4 +1,4 @@
-"""One cloned guest: boot, SSH commands, file copy, snapshots, and teardown."""
+"""One cloned guest: boot, SSH commands, snapshots, and teardown."""
 
 from __future__ import annotations
 
@@ -12,9 +12,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
 from prove_engine.logic import (
-    guest_endpoint,
     parse_vnc_address,
-    scp_argv,
     ssh_argv,
     tart_run_argv,
 )
@@ -34,7 +32,7 @@ if TYPE_CHECKING:
 
 
 class Machine:
-    """One cloned guest: boot, SSH commands, file copy, snapshots, teardown."""
+    """One cloned guest: boot, SSH commands, snapshots, teardown."""
 
     def __init__(self, engine: Engine, name: str, base: Base) -> None:
         self.engine = engine
@@ -149,22 +147,6 @@ class Machine:
         return self.engine.runner(
             ssh_argv(self.ip, command), env=self._ssh_env(), timeout=timeout, stdin=stdin
         )
-
-    def _copy(self, source: str, destination: str) -> None:
-        assert self.ip is not None
-        result = self.engine.runner(
-            scp_argv(self.ip, source, destination), env=self._ssh_env(), timeout=300
-        )
-        if result.exit_code != 0:
-            raise ProofError(f"copy failed: {result.stderr.strip()}")
-
-    def put(self, local: Path, remote: str) -> None:
-        assert self.ip is not None
-        self._copy(str(local), guest_endpoint(self.ip, remote))
-
-    def get(self, remote: str, local: Path) -> None:
-        assert self.ip is not None
-        self._copy(guest_endpoint(self.ip, remote), str(local))
 
     def halt(self) -> None:
         if self._proc is not None and self._proc.poll() is None:

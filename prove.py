@@ -14,7 +14,6 @@ Python API (`import prove_engine`; the test suite drives these):
     with engine.machine("first-run", base) as vm:
         vm.start(shares=[Share("repo", Path("/some/dir"), read_only=True)])
         result = vm.run("sw_vers -productVersion && uname -m", timeout=60)
-        vm.put(Path("a.txt"), "/tmp/a.txt")   # copy in; vm.get(remote, local) copies out
         vm.snapshot("clean"); vm.restore("clean")
     engine.run("first-run", script="echo hi", timeout=600, out_dir=Path("out"))
     engine.cleanup()                          # reap leftovers; purge=True removes the cache

@@ -5,7 +5,7 @@
 - logic: pure selection, validation, parsing, and command construction
 - process: command execution and host facts
 - toolchain: download and unpack the pinned Tart
-- machine: one cloned guest (boot, SSH, copy, snapshot, teardown)
+- machine: one cloned guest (boot, SSH, snapshot, teardown)
 - engine: Tart acquisition, the base image, per-run clones, and evidence
 - cli: argument parsing and dispatch
 """

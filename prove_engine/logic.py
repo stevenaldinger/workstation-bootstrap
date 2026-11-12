@@ -105,14 +105,6 @@ def ssh_argv(ip: str, remote: str) -> list[str]:
     return ["ssh", *SSH_OPTIONS, f"{GUEST_USER}@{ip}", remote]
 
 
-def scp_argv(ip: str, source: str, destination: str) -> list[str]:
-    return ["scp", "-q", "-r", *SSH_OPTIONS, source, destination]
-
-
-def guest_endpoint(ip: str, remote_path: str) -> str:
-    return f"{GUEST_USER}@{ip}:{remote_path}"
-
-
 def parse_guest_facts(output: str) -> dict[str, Any]:
     """Parse the `sw_vers -productVersion && uname -m` output into guest facts."""
     lines = [line.strip() for line in output.splitlines() if line.strip()]

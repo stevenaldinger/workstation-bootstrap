@@ -109,7 +109,7 @@ uv run prove.py cleanup --purge
 
 Shares appear in the guest under `/Volumes/My Shared Files/<name>`. Every run enables Gatekeeper first, because the vanilla image ships with it off. `--out` writes `env.json` (guest macOS version and architecture, image digest, Tart version, host version), `timings.json`, `result.json`, and the command's output. `prove.py` exits 0 when the guest command succeeds, 1 when it fails or times out, and 2 on an engine error.
 
-The engine is also a Python API for test suites: `from prove_engine import Engine, Share, host_info`. `Engine.base()`, `Engine.machine()` (a context manager that always deletes its clone), and `Engine.run()` cover the lifecycle. A `Machine` offers `start`, `run`, `put`, `get`, `snapshot`, `restore`, and `destroy`. A snapshot flushes the guest's disk, stops the machine, copies its disk, and boots it again, so it includes a reboot.
+The engine is also a Python API for test suites: `from prove_engine import Engine, Share, host_info`. `Engine.base()`, `Engine.machine()` (a context manager that always deletes its clone), and `Engine.run()` cover the lifecycle. A `Machine` offers `start`, `run`, `snapshot`, `restore`, and `destroy`. A snapshot flushes the guest's disk, stops the machine, copies its disk, and boots it again, so it includes a reboot. Share a folder with `--share` to move files in or out.
 
 To change a pin, edit `prove_engine/pins.py`. Take the Tart checksum from the release's published asset digest, and take an image digest from the registry's manifest for its tag.
 

@@ -1,4 +1,4 @@
-"""Process handling and the Machine: timeouts, SSH commands, snapshots."""
+"""Process handling and the Machine: timeouts and SSH commands."""
 
 from __future__ import annotations
 

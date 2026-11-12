@@ -211,12 +211,6 @@ def test_ssh_argv_ignores_host_config_and_keys_and_ends_with_the_command() -> No
     assert argv[-2:] == ["admin@192.168.64.9", "echo 'a b'"]
 
 
-def test_scp_argv_places_source_and_destination_last() -> None:
-    argv = logic.scp_argv("10.0.0.2", "/local/a", logic.guest_endpoint("10.0.0.2", "/tmp/a"))
-    assert argv[:3] == ["scp", "-q", "-r"]
-    assert argv[-2:] == ["/local/a", "admin@10.0.0.2:/tmp/a"]
-
-
 # --- Guest facts ---------------------------------------------------------------------
 
 
