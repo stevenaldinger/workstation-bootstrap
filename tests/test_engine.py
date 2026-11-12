@@ -122,14 +122,6 @@ def test_reap_deletes_only_run_clones(tmp_path: Path) -> None:
     assert deleted == ["delete wsrun-first-run-1", "delete wsrun-preview-2"]
 
 
-def test_cleanup_purge_removes_the_cache(tmp_path: Path) -> None:
-    engine = make_engine(tmp_path, FakeRunner())
-    engine.cache_root.mkdir(parents=True)
-    (engine.cache_root / "marker").write_text("x", encoding="utf-8")
-    assert engine.cleanup(purge=True) == []
-    assert not engine.cache_root.exists()
-
-
 def test_a_failed_tart_command_surfaces_its_stderr(tmp_path: Path) -> None:
     runner = FakeRunner([("clone", result_of("", 1, "no such VM"))])
     engine = make_engine(tmp_path, runner)

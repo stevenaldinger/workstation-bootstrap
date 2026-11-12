@@ -10,12 +10,18 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
 
+from prove_engine.cache import migrate_legacy_root
 from prove_engine.engine import Engine
+from prove_engine.lock import HostLock
 from prove_engine.logic import parse_share
 from prove_engine.model import ProofError
 from prove_engine.pins import DEFAULT_COMMAND, RUN_PREFIX
 from prove_engine.process import host_info
 
+# The starter downloads its files into ~/.cache/workstation-bootstrap, so the engine keeps its
+# own data one level down, where a purge can never reach the starter's files.
+LEGACY_CACHE_ROOT = Path.home() / ".cache" / "workstation-bootstrap"
+DEFAULT_CACHE_ROOT = LEGACY_CACHE_ROOT / "prove"
 # One VM runs at a time on a host, whatever cache root a run uses, so the lock sits beside it.
 DEFAULT_VM_LOCK = Path.home() / ".cache" / "workstation-bootstrap" / "vm.lock"
 
@@ -29,8 +35,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--cache-root",
         type=Path,
-        default=Path.home() / ".cache" / "workstation-bootstrap",
-        help="Folder for Tart, images, and logs (default: ~/.cache/workstation-bootstrap).",
+        default=DEFAULT_CACHE_ROOT,
+        help="Folder for Tart, images, and logs (default: ~/.cache/workstation-bootstrap/prove).",
     )
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("tart", help="Download, verify, and unpack the pinned Tart; print its path.")
@@ -52,6 +58,18 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     clean = sub.add_parser("cleanup", help="Delete leftover run clones.")
     clean.add_argument("--purge", action="store_true", help="Also delete the cache and images.")
     return parser.parse_args(argv)
+
+
+def migrate_default_root(engine: Engine) -> None:
+    """Move engine data from the old shared folder, holding the VM lock so no guest is using it."""
+    lock = HostLock(engine.vm_lock, "migrate-cache")
+    lock.acquire()
+    try:
+        moved = migrate_legacy_root(LEGACY_CACHE_ROOT, DEFAULT_CACHE_ROOT)
+    finally:
+        lock.release()
+    if moved:
+        print(f"moved {', '.join(moved)} from {LEGACY_CACHE_ROOT} to {DEFAULT_CACHE_ROOT}")
 
 
 def dispatch(args: argparse.Namespace, engine: Engine) -> int:
@@ -91,6 +109,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.cache_root, host=host_info(), env=dict(os.environ), vm_lock=DEFAULT_VM_LOCK
     )
     try:
+        if args.cache_root == DEFAULT_CACHE_ROOT:
+            migrate_default_root(engine)
         return dispatch(args, engine)
     except ProofError as exc:
         print(f"error: {exc}", file=sys.stderr)

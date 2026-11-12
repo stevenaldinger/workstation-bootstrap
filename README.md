@@ -84,7 +84,7 @@ Prerequisites:
 - About 60 GB of free disk for the first image pull, and 15 GB for each run. The base machine's disk is grown to 100 GB (the shipped image leaves too little room to install a full workstation): `Engine.base()` moves the image's recovery partition to the end of the raw disk file while the machine is stopped, then resizes the system container from the host. The disk file is sparse, so this takes no space until the guest writes to it.
 - `uv`, which `mise install` provides.
 
-Everything lives under `~/.cache/workstation-bootstrap` (`--cache-root` changes it), and VM images land in its `tart-home` folder, not in `~/.tart`.
+Everything lives under `~/.cache/workstation-bootstrap/prove` (`--cache-root` changes it), and VM images land in its `tart-home` folder, not in `~/.tart`. The folder above it is where `start.sh` keeps the starter files, so the engine never uses it. The first run after an upgrade moves an older engine cache out of that shared folder.
 
 ```sh
 # Download and verify Tart, then pull the image and make the base (about 24 GB, once).
@@ -101,7 +101,7 @@ uv run prove.py run first-run --script scenario.sh --timeout 1800 \
 # Leave the clone running to debug it; the command prints the SSH login.
 uv run prove.py run debug --script scenario.sh --keep-vm
 
-# List and delete leftover clones, or remove the cache, images, and Tart.
+# List and delete leftover clones, or remove the engine's cache, images, and Tart.
 uv run prove.py list
 uv run prove.py cleanup
 uv run prove.py cleanup --purge
@@ -115,7 +115,7 @@ The engine is also a Python API for test suites: `from prove_engine import Engin
 
 To change a pin, edit `prove_engine/pins.py`. Take the Tart checksum from the release's published asset digest, and take an image digest from the registry's manifest for its tag.
 
-Tart is under the Functional Source License 1.1, which permits internal use. To remove everything the engine created, run `uv run prove.py cleanup --purge`.
+Tart is under the Functional Source License 1.1, which permits internal use. To remove everything the engine created, run `uv run prove.py cleanup --purge`. A purge removes only the `tart`, `tart-home`, and `logs` folders and the `askpass.sh` file, and only from a folder that holds the `.prove-engine` marker the engine wrote, so a mistyped `--cache-root` is refused instead of deleted.
 
 ## Checks
 

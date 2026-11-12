@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from prove_engine.cache import check_purgeable, claim_root, purge_root
 from prove_engine.disk import grow_layout, grow_system_container
 from prove_engine.lock import HostLock, clear_if_stale, held_message, pid_alive, read_owner
 from prove_engine.logic import (
@@ -83,6 +84,7 @@ class Engine:
         return result
 
     def ensure_tart(self) -> Path:
+        claim_root(self.cache_root)
         archive = self.release_dir / "tart.tar.gz"
         self.release_dir.mkdir(parents=True, exist_ok=True)
         if not archive.exists():
@@ -135,6 +137,7 @@ class Engine:
         lock.acquire()
         vm: Machine | None = None
         try:
+            claim_root(self.cache_root)
             self.tart_home.mkdir(parents=True, exist_ok=True)
             check_free_space(shutil.disk_usage(self.tart_home).free, FREE_GB_PER_RUN)
             vm = Machine(self, machine_name(scenario, utc_stamp()), base)
@@ -193,13 +196,20 @@ class Engine:
         return stale
 
     def cleanup(self, *, purge: bool = False) -> list[str]:
+        """Delete leftover run clones; with `purge`, also the engine's own cache folders.
+
+        A purge that would be refused is refused before anything is deleted.
+        """
+        home = Path(self.env.get("HOME") or Path.home())
+        if purge:
+            check_purgeable(self.cache_root, home)
         owner = read_owner(self.vm_lock)
         if self.vm_lock.exists() and (owner is None or (pid_alive(owner.pid) and not owner.kept)):
             raise ProofError(held_message(self.vm_lock, owner))
         reaped = self.reap() if self.tart.exists() else []
         clear_if_stale(self.vm_lock)
         if purge:
-            shutil.rmtree(self.cache_root, ignore_errors=True)
+            purge_root(self.cache_root, home)
         return reaped
 
 
