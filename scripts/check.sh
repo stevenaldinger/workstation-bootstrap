@@ -9,20 +9,24 @@ set -euo pipefail
 # Usage:
 #   scripts/check.sh               # Every check
 #   scripts/check.sh shellcheck    # Lint every tracked *.sh file
+#   scripts/check.sh python        # ruff, ruff format, and mypy through uv
 #   scripts/check.sh tests         # Run the pytest suite through uv
 #   scripts/check.sh secrets       # Scan the full Git history with gitleaks
 #
 # Design decisions:
 #   - shellcheck, uv, and gitleaks come from the path; mise.toml pins them.
-#   - The pytest version is pinned here, so tests need no project or lock file.
+#   - The ruff, mypy, and pytest versions are pinned here, so Python checks need no
+#     project or lock file; tool settings live in pyproject.toml.
 # =============================================================================
 
 PYTEST_VERSION="9.2.0"
+RUFF_VERSION="0.17.4"
+MYPY_VERSION="2.4.1"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
-  echo "usage: scripts/check.sh [shellcheck|tests|secrets|all]" >&2
+  echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|all]" >&2
 }
 
 run_shellcheck() {
@@ -37,6 +41,15 @@ run_shellcheck() {
   (cd "${REPO_ROOT}" && shellcheck -x "${files[@]}")
 }
 
+run_python() {
+  (
+    cd "${REPO_ROOT}"
+    uv run --no-project --with "ruff==${RUFF_VERSION}" ruff check .
+    uv run --no-project --with "ruff==${RUFF_VERSION}" ruff format --check .
+    uv run --no-project --with "mypy==${MYPY_VERSION}" --with "pytest==${PYTEST_VERSION}" mypy
+  )
+}
+
 run_tests() {
   (cd "${REPO_ROOT}" && uv run --no-project --with "pytest==${PYTEST_VERSION}" pytest -q tests)
 }
@@ -49,10 +62,12 @@ main() {
   local target="${1:-all}"
   case "${target}" in
     shellcheck) run_shellcheck ;;
+    python) run_python ;;
     tests) run_tests ;;
     secrets) run_secrets ;;
     all)
       run_shellcheck
+      run_python
       run_tests
       run_secrets
       ;;

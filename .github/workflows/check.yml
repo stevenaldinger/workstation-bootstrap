@@ -31,6 +31,10 @@ jobs:
       - name: Lint shell scripts
         run: scripts/check.sh shellcheck
 
+      - name: Lint and type-check Python
+        if: ${{ !cancelled() }}
+        run: scripts/check.sh python
+
       - name: Run tests
         if: ${{ !cancelled() }}
         run: scripts/check.sh tests
