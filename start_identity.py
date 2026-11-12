@@ -6,6 +6,7 @@ import json
 import re
 import socket
 from collections.abc import Callable
+from pathlib import Path
 
 from start_base import MESSAGES, Context, Probe, StageError, run_human_step, tail
 
@@ -18,6 +19,8 @@ GITHUB_SSH_TARGET = "git@github.com"
 KEY_SCOPE = "admin:public_key"
 APP_NAME = "1Password"
 SETTINGS_URL = "onepassword://settings/developers"
+# GitHub's host keys, shipped beside this file and covered by the starter's checksum manifest.
+KNOWN_HOSTS = Path(__file__).with_name("github_known_hosts")
 GREETING_RE = re.compile(r"Hi (?P<login>[\w-]+)! You've successfully authenticated")
 
 
@@ -163,12 +166,24 @@ def create_key(ctx: Context) -> None:
     ctx.key_file.chmod(PUBLIC_KEY_MODE)
 
 
+def ssh_option(name: str, value: object) -> str:
+    """An `-o` value whose argument may hold spaces, quoted the way ssh_config(5) allows."""
+    text = str(value)
+    if '"' in text:
+        raise StageError(f"cannot pass a path containing a double quote to ssh: {text}")
+    return f'{name}="{text}"'
+
+
 def ssh_options(ctx: Context) -> list[str]:
-    """Options that make ssh use the 1Password agent and offer only the workstation key."""
+    """ssh options for the 1Password agent, the workstation key, and GitHub's pinned host keys."""
     options = [
-        f"IdentityAgent={ctx.agent_socket}",
+        ssh_option("IdentityAgent", ctx.agent_socket),
         "IdentitiesOnly=yes",
-        "StrictHostKeyChecking=accept-new",
+        "StrictHostKeyChecking=yes",
+        ssh_option("UserKnownHostsFile", KNOWN_HOSTS),
+        "GlobalKnownHostsFile=/dev/null",
+        # A pinned file must not be rewritten when the server offers its other keys.
+        "UpdateHostKeys=no",
     ]
     return ["-F", "/dev/null", *(arg for option in options for arg in ("-o", option))] + [
         "-i",

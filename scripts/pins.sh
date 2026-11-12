@@ -20,7 +20,7 @@ set -euo pipefail
 #   scripts/pins.sh show       # Print the commit and checksum a README would pin
 # =============================================================================
 
-STARTER_FILES=(start.py start_base.py start_clone.py start_config.py start_identity.py start_packages.py start.toml stage1.toml)
+STARTER_FILES=(start.py start_base.py start_clone.py start_config.py start_identity.py start_packages.py start.toml github_known_hosts stage1.toml)
 MANIFEST="start.sha256"
 SCRIPT="start.sh"
 
