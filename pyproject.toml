@@ -5,7 +5,16 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "BLE", "SIM"]
+select = ["E", "F", "I", "UP", "B", "BLE", "SIM", "S", "ARG"]
+
+[tool.ruff.lint.per-file-ignores]
+# These modules exist to run commands, and they pass an argument list (never a shell string).
+"prove_engine/process.py" = ["S603"]
+"start_base.py" = ["S603"]
+"scripts/check_commits.py" = ["S603", "S607"]
+# Tests assert, run git and the shell with argument lists, use fixed fake paths, and implement
+# fakes whose signatures must match the interface they stand in for.
+"tests/**" = ["S101", "S603", "S607", "S108", "ARG"]
 
 [tool.ruff.format]
 quote-style = "double"
