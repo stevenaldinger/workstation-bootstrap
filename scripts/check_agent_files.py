@@ -11,7 +11,10 @@ parent-relative path only works on the machine that wrote it. The check reports:
 
 - any file named CLAUDE.md, in any directory;
 - AGENTS.md, or anything under .claude/, that is a symlink (a dangling one included);
-- an absolute path or a `../` path inside a .claude/skills/*/SKILL.md file.
+- an absolute path or a `../` path inside a .claude/skills/*/SKILL.md or .claude/agents/*.md file;
+- a `.claude/settings.json` `agent` setting whose agent file `.claude/agents/<name>.md` is
+  missing, is a symlink, or declares a different `name`, and a settings file that is not a JSON
+  object.
 
 Run it through uv:
 
@@ -21,6 +24,7 @@ Run it through uv:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -73,27 +77,78 @@ def symlink_problems(root: Path) -> list[str]:
     return problems
 
 
+def instruction_files(root: Path) -> list[Path]:
+    """The skill and agent definition files, which are read from any machine."""
+    claude = root / ".claude"
+    return sorted([*claude.glob("skills/*/SKILL.md"), *claude.glob("agents/*.md")])
+
+
 def skill_path_problems(root: Path) -> list[str]:
     problems = []
-    for skill in sorted((root / ".claude" / "skills").glob("*/SKILL.md")):
-        if skill.is_symlink():
+    for definition in instruction_files(root):
+        if definition.is_symlink():
             continue
-        for number, line in enumerate(skill.read_text(encoding="utf-8").splitlines(), start=1):
+        for number, line in enumerate(definition.read_text(encoding="utf-8").splitlines(), start=1):
             if ABSOLUTE_PATH_RE.search(line):
                 problems.append(
-                    f"{relative(skill, root)}:{number}: absolute path; "
+                    f"{relative(definition, root)}:{number}: absolute path; "
                     "use a path under ${CLAUDE_PROJECT_DIR} or relative to the repository"
                 )
             if PARENT_PATH_RE.search(line):
                 problems.append(
-                    f"{relative(skill, root)}:{number}: '../' path leaves the repository"
+                    f"{relative(definition, root)}:{number}: '../' path leaves the repository"
                 )
     return problems
 
 
+def declared_name(path: Path) -> str | None:
+    """The `name` in the agent file's frontmatter, or None when it has none."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return None
+        key, _, value = line.partition(":")
+        if key.strip() == "name":
+            return value.strip().strip("\"'")
+    return None
+
+
+def default_agent_problems(root: Path) -> list[str]:
+    """The `agent` setting must name an agent file that exists, is real, and matches."""
+    settings = root / ".claude" / "settings.json"
+    if not settings.is_file():
+        return []
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+    except ValueError as error:
+        return [f".claude/settings.json: not valid JSON ({error})"]
+    if not isinstance(data, dict):
+        return [".claude/settings.json: must hold a JSON object"]
+    if "agent" not in data:
+        return []
+    name = data["agent"]
+    if not isinstance(name, str) or not name:
+        return [".claude/settings.json: 'agent' must be the name of an agent"]
+    path = root / ".claude" / "agents" / f"{name}.md"
+    if path.is_symlink():
+        return [f"{relative(path, root)}: is a symlink; the default agent must be a real file"]
+    if not path.is_file():
+        return [f".claude/settings.json: 'agent' is {name!r} but {relative(path, root)} is missing"]
+    if declared_name(path) != name:
+        return [f"{relative(path, root)}: frontmatter 'name' must be {name!r}, the default agent"]
+    return []
+
+
 def check(root: Path) -> list[str]:
     """Every problem found under root; an empty list means the files are in order."""
-    return claude_md_problems(root) + symlink_problems(root) + skill_path_problems(root)
+    return (
+        claude_md_problems(root)
+        + symlink_problems(root)
+        + skill_path_problems(root)
+        + default_agent_problems(root)
+    )
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:

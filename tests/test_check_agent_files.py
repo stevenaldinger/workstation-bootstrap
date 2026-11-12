@@ -131,3 +131,78 @@ def test_main_reports_problems_and_returns_one(
     assert "CLAUDE.md" in capsys.readouterr().err
     (root / "CLAUDE.md").unlink()
     assert check_agent_files.main(["--root", str(root)]) == 0
+
+
+def default_agent(
+    root: Path, setting: str = '{"agent": "maintainer"}', name: str = "maintainer"
+) -> None:
+    (root / ".claude" / "settings.json").write_text(setting, encoding="utf-8")
+    agent = root / ".claude" / "agents" / f"{name}.md"
+    agent.parent.mkdir(parents=True, exist_ok=True)
+    agent.write_text(
+        f"---\nname: {name}\ndescription: Maintains it.\n---\n\nBody.\n", encoding="utf-8"
+    )
+
+
+def test_a_default_agent_with_a_real_matching_file_passes(tmp_path: Path) -> None:
+    root = build(tmp_path)
+    default_agent(root)
+    assert check_agent_files.check(root) == []
+
+
+def test_a_default_agent_whose_file_is_missing_fails(tmp_path: Path) -> None:
+    root = build(tmp_path)
+    default_agent(root, '{"agent": "ghost"}')
+    problems = check_agent_files.check(root)
+    assert any("'ghost'" in problem and "missing" in problem for problem in problems), problems
+
+
+def test_a_default_agent_file_that_is_a_symlink_fails(tmp_path: Path) -> None:
+    root = build(tmp_path)
+    default_agent(root)
+    agent = root / ".claude" / "agents" / "maintainer.md"
+    real = root / "elsewhere.md"
+    real.write_text(agent.read_text(encoding="utf-8"), encoding="utf-8")
+    agent.unlink()
+    agent.symlink_to(real)
+    problems = check_agent_files.check(root)
+    assert any("maintainer.md" in problem and "symlink" in problem for problem in problems)
+
+
+def test_a_default_agent_whose_frontmatter_name_differs_fails(tmp_path: Path) -> None:
+    root = build(tmp_path)
+    default_agent(root, '{"agent": "maintainer"}', name="maintainer")
+    agent = root / ".claude" / "agents" / "maintainer.md"
+    agent.write_text("---\nname: other\ndescription: x\n---\n", encoding="utf-8")
+    assert any("frontmatter 'name'" in p for p in check_agent_files.check(root))
+
+
+@pytest.mark.parametrize(
+    ("setting", "fragment"),
+    [
+        ("not json", "not valid JSON"),
+        ("[1]", "JSON object"),
+        ('{"agent": ""}', "name of an agent"),
+        ('{"agent": 3}', "name of an agent"),
+    ],
+)
+def test_a_malformed_settings_file_fails(tmp_path: Path, setting: str, fragment: str) -> None:
+    root = build(tmp_path)
+    (root / ".claude" / "settings.json").write_text(setting, encoding="utf-8")
+    assert any(fragment in problem for problem in check_agent_files.check(root))
+
+
+def test_settings_without_an_agent_key_are_fine(tmp_path: Path) -> None:
+    root = build(tmp_path)
+    (root / ".claude" / "settings.json").write_text('{"permissions": {}}', encoding="utf-8")
+    assert check_agent_files.check(root) == []
+
+
+def test_an_absolute_path_in_an_agent_file_is_rejected(tmp_path: Path) -> None:
+    root = build(tmp_path)
+    default_agent(root)
+    agent = root / ".claude" / "agents" / "maintainer.md"
+    agent.write_text(agent.read_text(encoding="utf-8") + "Edit /Users/x/y.\n", encoding="utf-8")
+    assert any(
+        "agents/maintainer.md" in p and "absolute path" in p for p in check_agent_files.check(root)
+    )
