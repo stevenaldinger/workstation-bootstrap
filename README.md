@@ -125,3 +125,7 @@ scripts/check.sh
 ```
 
 `mise install` reads `mise.toml` and installs the pinned gitleaks, Python, shellcheck, and uv. Ruff, mypy, and pytest versions are pinned in `scripts/check.sh` and run through `uv run --no-project`.
+
+## Agent instructions
+
+Claude Code reads `AGENTS.md` and the `change-starter` skill under `.claude/skills/`; there is no `CLAUDE.md`, and no skill is a symlink, because either one breaks how Claude Code loads them. The skill covers the checks above, the release flow, and the hand-off of the new pin to the private repository. The private repository's `ws check --online` verifies these files at the commit its README pins.
