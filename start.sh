@@ -12,8 +12,8 @@ UV_VERSION="0.13.7"
 SUPPORTED_MAJORS=" 26 27 "
 # The starter files are listed, with their checksums, in start.sha256 at the commit that last
 # changed them. Only that manifest's own checksum is pinned here.
-FILES_COMMIT="71ba0263a18757d81bbcf454545c6ad96463659f"
-MANIFEST_SHA256="20baafc1b800526485744275be97e0b4d35c2a56628208130064327835ec610c"
+FILES_COMMIT="5d794bb8090919e6f8ce50346f7045d01bfaf76e"
+MANIFEST_SHA256="ac52b508b441b84471b05bec811d607cb0c3fc9e0a8ea4f6569b949abbcfe4e4"
 RAW_URL="https://raw.githubusercontent.com/stevenaldinger/workstation-bootstrap/${FILES_COMMIT}"
 
 die() { echo "start.sh: $1" >&2; exit "${2:-1}"; }
