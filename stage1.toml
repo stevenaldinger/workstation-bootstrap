@@ -1,0 +1,8 @@
+# Packages the starter installs before anything else: the password manager app and
+# its command line, then Git and the GitHub CLI that the SSH identity and the clone need.
+# `mise bootstrap packages apply` reads this file as its only configuration.
+[bootstrap.packages]
+"brew-cask:1password"     = { version = "latest", os = ["macos"] }  # purpose: password manager app and SSH agent
+"brew-cask:1password-cli" = { version = "latest", os = ["macos"] }  # purpose: 1Password command line, authorized by the app
+"brew:git"                = { version = "latest", os = ["macos"] }  # purpose: clones the setup repository
+"brew:gh"                 = { version = "latest", os = ["macos"] }  # purpose: registers the SSH key with GitHub

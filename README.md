@@ -6,7 +6,7 @@
 
 The starter holds scripts only. It contains no account identifiers, email addresses, or package lists. The one personal value it needs, the 1Password sign-in address, is passed as a command argument.
 
-This repository currently holds the proof engine and the starter's checks. The starter script, `start.sh`, is added here when it is released.
+The repository also holds the proof engine and the checks for both.
 
 ## Bootstrap command
 
@@ -15,10 +15,58 @@ A Mac runs the starter with one command. It downloads `start.sh` at one commit, 
 ```sh
 curl -fsSL -o /tmp/ws-start.sh https://raw.githubusercontent.com/stevenaldinger/workstation-bootstrap/<commit>/start.sh \
   && echo "<sha256>  /tmp/ws-start.sh" | shasum -a 256 -c - \
-  && /bin/bash /tmp/ws-start.sh --personal-account <sign-in address>
+  && /bin/bash /tmp/ws-start.sh --personal-account <email or sign-in address>
 ```
 
-The private repository's README holds the pinned `<commit>` and `<sha256>`. Its checks download `start.sh` at that commit and compare hashes, so the starter cannot change without the pin changing too.
+The private repository's README holds the pinned `<commit>` and `<sha256>`. Its checks download `start.sh` at that commit and compare hashes, so the starter cannot change without the pin changing too. `--personal-account` is the one personal value the starter needs: the email or sign-in address of the personal 1Password account. Any other argument goes to the private repository's `ws bootstrap`.
+
+## What the starter does
+
+`start.sh` is the only Bash, and it needs only the `/bin/bash` 3.2 that every Mac has. In order, it:
+
+1. stops with exit status 2, before changing anything, unless the Mac is Apple silicon running macOS 26 or 27;
+2. asks for administrator access once and keeps it alive;
+3. downloads a pinned mise release, checks its SHA-256, and installs it into `~/.local/bin`;
+4. installs the pinned Python and uv through mise;
+5. downloads `start.sha256` and checks it against the checksum pinned in `start.sh`, downloads each file it lists, and checks every one;
+6. runs `start.py` under that Python.
+
+`start.py` uses only the standard library. Every step checks the machine first and does nothing when the check already passes, so a re-run resumes at the first step that is not yet satisfied:
+
+1. Install the packages in `stage1.toml`: the 1Password app and command line, Git, and the GitHub CLI.
+2. Sign in to the personal 1Password account (H1).
+3. Turn on the 1Password command-line integration and the SSH agent (H3).
+4. Create the SSH key `GitHub SSH (workstation)` in the personal Private vault, and write its public half to `~/.ssh/github_workstation.pub`. No private key file is ever written.
+5. Register the key with GitHub through the GitHub CLI, after the one-time-code approval (H4), then drop the key-registration scope from the token and verify the SSH handshake through the 1Password agent.
+6. Clone the private repository to `~/.config/mise` over SSH and set its hook directory. An existing checkout of the same remote is fast-forwarded; any other non-empty directory stops the run with its path.
+7. Hand off to `~/.config/mise/bin/ws bootstrap`.
+
+A human step runs only when its check fails. The starter then opens the app or settings pane, states the action, waits for Enter, checks again, and repeats until the check passes:
+
+| ID | Step | Check |
+|----|------|-------|
+| H1 | Sign in to the personal 1Password account | `op account list` lists the account |
+| H3 | Turn on the command-line integration and the SSH agent | `op vault list` succeeds without a prompt and the agent socket exists |
+| H4 | Approve the GitHub sign-in with a one-time code | `gh auth status` shows the key-registration scope |
+
+`WS_REPO_URL` replaces the clone address, which the clean-machine proof uses to clone from a host mirror.
+
+## Releasing a starter change
+
+`start.sh` pins one checksum, the one of `start.sha256`, which lists the checksum of every other starter file. A change is released in three commits:
+
+```sh
+# 1. Commit the changed starter files, then rewrite the manifest and commit it
+scripts/pins.sh manifest
+git add start.sha256 && git commit -m "Update the starter manifest"
+# 2. Point start.sh at that commit and the manifest, then commit it
+scripts/pins.sh release
+git add start.sh && git commit -m "Release the starter"
+# 3. After the push, print the commit and checksum that the private README pins
+scripts/pins.sh show
+```
+
+The tests fail while any pin and its file disagree.
 
 ## Proof engine
 
