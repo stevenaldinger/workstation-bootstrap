@@ -32,11 +32,14 @@ from pathlib import Path
 from start_base import (
     EXIT_FAILED,
     EXIT_INPUT_ENDED,
+    MACOS,
     MESSAGES,
     Console,
     Context,
     Execv,
     InputEnded,
+    NamedStep,
+    Platform,
     Runner,
     SocketCheck,
     StageError,
@@ -50,6 +53,20 @@ from start_identity import create_key, enable_integrations, register_key, sign_i
 from start_packages import install_stage1
 
 REPO_URL_ENV = "WS_REPO_URL"
+
+
+def select_platform() -> Platform:
+    """The platform of the machine this process runs on."""
+    if sys.platform == "win32":
+        from start_windows import windows_platform
+
+        return windows_platform()
+    return MACOS
+
+
+def host_steps(ctx: Context, steps: Sequence[NamedStep]) -> list[tuple[str, Callable[[], None]]]:
+    """A platform's own steps, bound to the context."""
+    return [(title_id, lambda step=step: step(ctx)) for title_id, step in steps]  # type: ignore[misc]
 
 
 def parse_args(argv: Sequence[str]) -> tuple[argparse.Namespace, list[str]]:
@@ -84,8 +101,9 @@ def main(
     run: Runner = run_captured,
     stream: Streamer = run_streamed,
     socket_ready: SocketCheck = Path.is_socket,
-    execv: Execv = os.execv,
+    execv: Execv | None = None,
     environ: Mapping[str, str] | None = None,
+    platform: Platform | None = None,
 ) -> int:
     """Run every step in order; return the exit status when a step fails."""
     args, extra = parse_args(sys.argv[1:] if argv is None else argv)
@@ -104,16 +122,19 @@ def main(
         run=run,
         stream=stream,
         socket_ready=socket_ready,
+        platform=platform or select_platform(),
     )
     url = env.get(REPO_URL_ENV) or config.repository.url
     steps: list[tuple[str, Callable[[], None]]] = [
+        *host_steps(ctx, ctx.platform.steps_before_packages),
         ("stage1.title", lambda: install_stage1(ctx, args.stage1)),
         ("sign-in.title", lambda: sign_in(ctx)),
+        *host_steps(ctx, ctx.platform.steps_before_integrations),
         ("integrations.title", lambda: enable_integrations(ctx)),
         ("key.title", lambda: create_key(ctx)),
         ("register.title", lambda: register_key(ctx)),
         ("clone.title", lambda: clone_repository(ctx, url)),
-        ("handoff.title", lambda: hand_off(ctx, extra, execv)),
+        ("handoff.title", lambda: hand_off(ctx, extra, execv or ctx.platform.execv)),
     ]
     title = ""
     try:

@@ -6,7 +6,7 @@ import json
 import re
 import socket
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from start_base import MESSAGES, Context, Probe, StageError, run_human_step, tail
 
@@ -17,8 +17,6 @@ PUBLIC_KEY_MODE = 0o644
 GITHUB_HOST = "github.com"
 GITHUB_SSH_TARGET = "git@github.com"
 KEY_SCOPE = "admin:public_key"
-APP_NAME = "1Password"
-SETTINGS_URL = "onepassword://settings/developers"
 # GitHub's host keys, shipped beside this file and covered by the starter's checksum manifest.
 KNOWN_HOSTS = Path(__file__).with_name("github_known_hosts")
 GREETING_RE = re.compile(r"Hi (?P<login>[\w-]+)! You've successfully authenticated")
@@ -58,18 +56,14 @@ def check_integrations(ctx: Context) -> Probe:
         return Probe(
             False, MESSAGES["integrations.vault-denied"].format(detail=tail(vaults.output))
         )
-    if not ctx.socket_ready(ctx.agent_socket):
-        return Probe(
-            False, MESSAGES["integrations.socket-missing"].format(path=str(ctx.agent_socket))
-        )
-    return Probe(True)
+    return ctx.platform.agent_probe(ctx)
 
 
-def open_command(ctx: Context, *argv: str) -> Callable[[], None]:
-    """An action that runs `open`; its status is ignored because the check decides the outcome."""
+def open_command(ctx: Context, argv: tuple[str, ...]) -> Callable[[], None]:
+    """An action that opens the app or pane; its status is ignored because the check decides."""
 
     def act() -> None:
-        ctx.stream(["open", *argv], None)
+        ctx.stream(list(argv), None)
 
     return act
 
@@ -79,7 +73,7 @@ def sign_in(ctx: Context) -> None:
         ctx,
         "sign-in.title",
         lambda: check_signed_in(ctx),
-        open_command(ctx, "-a", APP_NAME),
+        open_command(ctx, ctx.platform.open_app),
         "sign-in.prompt",
         account=ctx.personal,
     )
@@ -90,8 +84,8 @@ def enable_integrations(ctx: Context) -> None:
         ctx,
         "integrations.title",
         lambda: check_integrations(ctx),
-        open_command(ctx, SETTINGS_URL),
-        "integrations.prompt",
+        open_command(ctx, ctx.platform.open_settings),
+        ctx.platform.integrations_prompt,
     )
 
 
@@ -182,8 +176,12 @@ def create_key(ctx: Context) -> None:
 
 
 def ssh_option(name: str, value: object) -> str:
-    """An `-o` value whose argument may hold spaces, quoted the way ssh_config(5) allows."""
-    text = str(value)
+    """An `-o` value whose argument may hold spaces, quoted the way ssh_config(5) allows.
+
+    A path is written with forward slashes, which every ssh accepts and which a backslash
+    escape in the option value cannot misread.
+    """
+    text = value.as_posix() if isinstance(value, PurePath) else str(value)
     if '"' in text:
         raise StageError(f"cannot pass a path containing a double quote to ssh: {text}")
     return f'{name}="{text}"'
@@ -191,24 +189,27 @@ def ssh_option(name: str, value: object) -> str:
 
 def ssh_options(ctx: Context) -> list[str]:
     """ssh options for the 1Password agent, the workstation key, and GitHub's pinned host keys."""
+    platform = ctx.platform
     options = [
-        ssh_option("IdentityAgent", ctx.agent_socket),
+        # Windows OpenSSH reaches the 1Password agent through its default pipe.
+        *([ssh_option("IdentityAgent", ctx.agent_socket)] if platform.agent_option else []),
         "IdentitiesOnly=yes",
         "StrictHostKeyChecking=yes",
         ssh_option("UserKnownHostsFile", KNOWN_HOSTS),
-        "GlobalKnownHostsFile=/dev/null",
+        f"GlobalKnownHostsFile={platform.null_device}",
         # A pinned file must not be rewritten when the server offers its other keys.
         "UpdateHostKeys=no",
     ]
-    return ["-F", "/dev/null", *(arg for option in options for arg in ("-o", option))] + [
+    return ["-F", platform.null_device, *(arg for option in options for arg in ("-o", option))] + [
         "-i",
-        str(ctx.key_file),
+        ctx.key_file.as_posix(),
     ]
 
 
 def handshake(ctx: Context) -> Probe:
     """Whether GitHub authenticates the workstation key through the agent."""
-    command = ["ssh", "-T", *ssh_options(ctx), "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+    ssh = ctx.platform.tool_path("ssh")
+    command = [ssh, "-T", *ssh_options(ctx), "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
     result = ctx.run([*command, GITHUB_SSH_TARGET], None)
     if GREETING_RE.search(result.output):
         return Probe(True)

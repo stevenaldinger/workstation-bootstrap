@@ -16,8 +16,11 @@ def install_stage1(ctx: Context, stage1: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="stage1-") as empty:
         environment = {"MISE_GLOBAL_CONFIG_FILE": str(stage1), "MISE_CONFIG_DIR": empty}
         status = ctx.run(["mise", "bootstrap", "packages", "status", "--missing"], environment)
-        if status.returncode == 0:
-            return
-        code = ctx.stream(["mise", "bootstrap", "packages", "apply", "--yes"], environment)
-        if code != 0:
-            raise StageError(MESSAGES["stage1.failed"].format(detail=f"exit {code}"))
+        if status.returncode != 0:
+            if ctx.platform.stage1_notice:
+                ctx.console.say(ctx.platform.stage1_notice)
+            code = ctx.stream(["mise", "bootstrap", "packages", "apply", "--yes"], environment)
+            if code != 0:
+                raise StageError(MESSAGES["stage1.failed"].format(detail=f"exit {code}"))
+    # The installers change the machine's PATH, which this process read before they ran.
+    ctx.platform.refresh_environment(ctx)

@@ -105,7 +105,7 @@ def test_integrations_opens_the_settings_pane_then_passes(machine: Machine) -> N
     identity.sign_in(ctx)
     identity.enable_integrations(ctx)
     assert session.console.shown == ["integrations.prompt"]
-    assert open_calls(machine) == [[identity.SETTINGS_URL]]
+    assert open_calls(machine) == [["onepassword://settings/developers"]]
 
 
 def test_integrations_checks_the_agent_socket_as_well_as_the_vault_listing(

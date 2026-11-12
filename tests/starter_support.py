@@ -109,17 +109,16 @@ def build_machine(
 
 @dataclass
 class Person:
-    """Stands in for the owner: each Enter runs the next action, then returns."""
+    """Stands in for the owner: each line typed runs the next action and returns its text."""
 
-    actions: list[Callable[[], None]] = field(default_factory=list)
+    actions: list[Callable[[], str | None]] = field(default_factory=list)
     enters: int = 0
 
     def __call__(self, _prompt: str) -> str:
         if not self.actions:
             raise EOFError
         self.enters += 1
-        self.actions.pop(0)()
-        return ""
+        return self.actions.pop(0)() or ""
 
 
 @dataclass
@@ -134,7 +133,7 @@ class Session:
         return base.MESSAGES[message_id].format(**values)
 
 
-def make_session(*actions: Callable[[], None]) -> Session:
+def make_session(*actions: Callable[[], str | None]) -> Session:
     person = Person(list(actions))
     lines: list[str] = []
     return Session(base.Console(read=person, write=lines.append), lines, person)

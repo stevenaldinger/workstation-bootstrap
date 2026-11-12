@@ -75,7 +75,7 @@ def test_the_clone_runs_with_the_long_timeout_and_other_commands_with_the_short_
 
 def test_a_handoff_that_cannot_exec_is_a_stage_error(tmp_path: Path, machine_home: Machine) -> None:
     ctx = make_context(machine_home)
-    ws = ctx.clone_dir / start_clone.WS_RELATIVE
+    ws = ctx.clone_dir / ctx.platform.ws_script
     ws.parent.mkdir(parents=True)
     ws.write_text("#!/bin/sh\n", encoding="utf-8")
 

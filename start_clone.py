@@ -9,12 +9,10 @@ from pathlib import Path
 from start_base import CLONE_TIMEOUT_SECONDS, MESSAGES, Context, Execv, StageError, tail
 from start_identity import ssh_options
 
-WS_RELATIVE = Path("bin/ws")
-
 
 def clone_environment(ctx: Context) -> dict[str, str]:
     """The environment that makes git's ssh use the agent and the workstation key."""
-    return {"GIT_SSH_COMMAND": shlex.join(["ssh", *ssh_options(ctx)])}
+    return {"GIT_SSH_COMMAND": shlex.join([ctx.platform.tool_path("ssh"), *ssh_options(ctx)])}
 
 
 def directory_is_empty(path: Path) -> bool:
@@ -38,21 +36,27 @@ def clone_repository(ctx: Context, url: str) -> None:
     result = ctx.run(command, environment, timeout=CLONE_TIMEOUT_SECONDS)
     if result.returncode != 0:
         raise StageError(MESSAGES["clone.failed"].format(detail=tail(result.output)))
-    hooks_path = ctx.config.repository.hooks_path
-    hooks = ctx.run(["git", "-C", str(target), "config", "core.hooksPath", hooks_path], None)
-    if hooks.returncode != 0:
-        raise StageError(MESSAGES["clone.failed"].format(detail=tail(hooks.output)))
+    settings = {"core.hooksPath": ctx.config.repository.hooks_path}
+    if ctx.platform.sets_core_ssh_command:
+        # Git for Windows' bundled ssh cannot reach the 1Password agent, so later pulls use
+        # the system ssh and the options in the owner's ssh config.
+        settings["core.sshCommand"] = ctx.platform.tool_path("ssh")
+    for key, value in settings.items():
+        configured = ctx.run(["git", "-C", str(target), "config", key, value], None)
+        if configured.returncode != 0:
+            raise StageError(MESSAGES["clone.failed"].format(detail=tail(configured.output)))
 
 
 def hand_off(ctx: Context, extra: Sequence[str], execv: Execv) -> None:
     """Replace this process with the cloned repository's `ws bootstrap`."""
-    ws = ctx.clone_dir / WS_RELATIVE
+    relative = ctx.platform.ws_script
+    ws = ctx.clone_dir / relative
     if not ws.is_file():
-        raise StageError(MESSAGES["handoff.missing"].format(path=str(WS_RELATIVE)))
+        raise StageError(MESSAGES["handoff.missing"].format(path=str(relative)))
     try:
         execv(str(ws), [str(ws), "bootstrap", *extra])
     except OSError as error:
         reason = error.strerror or str(error)
         raise StageError(
-            MESSAGES["handoff.failed"].format(path=str(WS_RELATIVE), detail=reason)
+            MESSAGES["handoff.failed"].format(path=str(relative), detail=reason)
         ) from error

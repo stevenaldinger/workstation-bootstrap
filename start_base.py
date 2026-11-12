@@ -29,6 +29,7 @@ MESSAGES: dict[str, str] = {
     "step.heading": "[{n}/{total}] {title}",
     "step.failed": 'Still waiting on "{step}": {detail}',
     "step.retry": "Press Enter to try again.",
+    "choice.invalid": "Type a number from 1 to {count} and press Enter.",
     "input.ended": "Input ended before {step} finished; run the same command again to resume.",
     "stage1.title": "Install the password manager, Git, and the GitHub CLI",
     "stage1.failed": "Installing the stage-1 packages failed: {detail}",
@@ -182,6 +183,23 @@ class Console:
         except EOFError:
             raise InputEnded from None
 
+    def choose(self, message_id: str, option_ids: Sequence[str], **values: str) -> int:
+        """Show a question and its numbered options; return the zero-based index typed.
+
+        Only a number in range counts, so a bare Enter never answers for the person.
+        """
+        self.say(message_id, **values)
+        for number, option_id in enumerate(option_ids, start=1):
+            self._write(f"  {number}. {MESSAGES[option_id]}")
+        while True:
+            try:
+                answer = self._read("").strip()
+            except EOFError:
+                raise InputEnded from None
+            if answer.isdigit() and 1 <= int(answer) <= len(option_ids):
+                return int(answer) - 1
+            self.say("choice.invalid", count=str(len(option_ids)))
+
 
 @dataclass(frozen=True)
 class Probe:
@@ -189,6 +207,73 @@ class Probe:
 
     ok: bool
     detail: str = ""
+
+
+Step = Callable[["Context"], None]
+NamedStep = tuple[str, Step]
+
+
+def mac_agent_probe(ctx: Context) -> Probe:
+    """Whether the 1Password SSH agent's socket exists."""
+    if ctx.socket_ready(ctx.agent_socket):
+        return Probe(True)
+    return Probe(False, MESSAGES["integrations.socket-missing"].format(path=str(ctx.agent_socket)))
+
+
+def keep_environment(_ctx: Context) -> None:
+    """Leave the process environment as it is."""
+
+
+@dataclass(frozen=True)
+class Platform:
+    """What differs between the hosts the starter runs on; the steps themselves are shared.
+
+    `open_app` and `open_settings` are the commands that show the password manager and its
+    developer settings. `ssh_dir` is the folder that holds `ssh`, or None to find it on PATH.
+    `steps_before_packages` and `steps_before_integrations` are host-only steps, each a message
+    ID for its heading and a function of the context.
+    """
+
+    name: str
+    open_app: tuple[str, ...]
+    open_settings: tuple[str, ...]
+    ssh_dir: Path | None
+    ssh_suffix: str
+    null_device: str
+    ws_script: Path
+    agent_option: bool
+    sets_core_ssh_command: bool
+    integrations_prompt: str
+    stage1_notice: str
+    agent_probe: Callable[[Context], Probe]
+    refresh_environment: Callable[[Context], None]
+    execv: Execv
+    steps_before_packages: tuple[NamedStep, ...] = ()
+    steps_before_integrations: tuple[NamedStep, ...] = ()
+
+    def tool_path(self, name: str) -> str:
+        """The command that runs `name` from the platform's ssh folder, in forward slashes."""
+        if self.ssh_dir is None:
+            return name
+        return (self.ssh_dir / f"{name}{self.ssh_suffix}").as_posix()
+
+
+MACOS = Platform(
+    name="macos",
+    open_app=("open", "-a", "1Password"),
+    open_settings=("open", "onepassword://settings/developers"),
+    ssh_dir=None,
+    ssh_suffix="",
+    null_device="/dev/null",
+    ws_script=Path("bin/ws"),
+    agent_option=True,
+    sets_core_ssh_command=False,
+    integrations_prompt="integrations.prompt",
+    stage1_notice="",
+    agent_probe=mac_agent_probe,
+    refresh_environment=keep_environment,
+    execv=os.execv,
+)
 
 
 @dataclass
@@ -202,6 +287,7 @@ class Context:
     run: Runner = run_captured
     stream: Streamer = run_streamed
     socket_ready: SocketCheck = Path.is_socket
+    platform: Platform = MACOS
     account_id: str = ""
 
     @property
