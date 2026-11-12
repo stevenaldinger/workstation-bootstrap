@@ -184,7 +184,7 @@ class Engine:
             timings.update(vm.start(shares))
             facts = vm.run(DEFAULT_COMMAND, timeout=60)
             env = env_facts(parse_guest_facts(facts.stdout), base.image, self.host)
-            vm.run("sudo spctl --global-enable", timeout=60)
+            env["gatekeeper"] = enable_gatekeeper(vm)
             mark = time.monotonic()
             result = vm.run("/bin/bash -s", timeout=timeout, stdin=script)
             timings["script_seconds"] = round(time.monotonic() - mark, 1)
@@ -221,6 +221,23 @@ class Engine:
         if purge:
             purge_root(self.cache_root, home)
         return reaped
+
+
+def enable_gatekeeper(vm: Machine) -> str:
+    """Turn Gatekeeper on and confirm it; the vanilla image ships with it off.
+
+    `spctl --status` prints "assessments enabled" or "assessments disabled" (see spctl(8)).
+    """
+    enabled = vm.run("sudo spctl --global-enable", timeout=60)
+    if enabled.exit_code != 0:
+        detail = (enabled.stderr or enabled.stdout).strip()
+        raise ProofError(f"enabling Gatekeeper failed ({enabled.exit_code}): {detail}")
+    status = vm.run("spctl --status", timeout=60)
+    if "assessments enabled" not in status.stdout:
+        raise ProofError(
+            f"Gatekeeper is not enabled after spctl --global-enable: {status.stdout.strip()!r}"
+        )
+    return "enabled"
 
 
 def write_evidence(out_dir: Path, outcome: RunResult) -> None:

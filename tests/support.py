@@ -28,6 +28,7 @@ class FakeRunner:
         self.rules = list(rules)
         self.calls: list[tuple[str, ...]] = []
         self.timeouts: list[float | None] = []
+        self.stdins: list[str | None] = []
 
     def __call__(
         self,
@@ -39,6 +40,7 @@ class FakeRunner:
     ) -> CommandResult:
         self.calls.append(tuple(argv))
         self.timeouts.append(timeout)
+        self.stdins.append(stdin)
         line = " ".join(str(part) for part in argv)
         for fragment, result in self.rules:
             if fragment in line:

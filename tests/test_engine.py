@@ -297,3 +297,94 @@ def test_ensure_disk_fails_when_the_resize_leaves_the_container_small(
     monkeypatch.setattr(engine_module, "grow_system_container", lambda *_: None)
     with pytest.raises(ProofError, match="still not grown"):
         harness.engine.ensure_disk("ws-base-26")
+
+
+# --- The run path --------------------------------------------------------------------
+
+# What the guest prints: `sw_vers -productVersion` and `uname -m` (arm64), `spctl --status`
+# (see spctl(8)), and `tart ip` (one address and a newline).
+GUEST_FACTS = "26.6.2\narm64\n"
+GATEKEEPER_ON = "assessments enabled\n"
+GATEKEEPER_OFF = "assessments disabled\n"
+
+
+def run_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *rules: tuple[str, CommandResult],
+) -> tuple[Engine, FakeRunner]:
+    runner = FakeRunner(
+        [
+            *rules,
+            ("/tart ip ", result_of("192.168.64.7\n")),
+            ("sw_vers", result_of(GUEST_FACTS)),
+            ("spctl --global-enable", result_of("")),
+            ("spctl --status", result_of(GATEKEEPER_ON)),
+            ("/bin/bash -s", result_of("script output\n")),
+        ]
+    )
+    engine = make_engine(tmp_path, runner)
+    monkeypatch.setattr(
+        Engine, "base", lambda self, major=None: Base(select_image(26), "ws-base-26")
+    )
+    return engine, runner
+
+
+def guest_commands(runner: FakeRunner) -> list[str]:
+    return [call[-1] for call in runner.calls if call[0] == "ssh"]
+
+
+def test_run_enables_gatekeeper_before_the_script_and_records_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, runner = run_engine(tmp_path, monkeypatch)
+    outcome = engine.run("first-run", script="echo hi\n", timeout=30, out_dir=tmp_path / "out")
+    assert guest_commands(runner)[-4:] == [
+        pins.DEFAULT_COMMAND,
+        "sudo spctl --global-enable",
+        "spctl --status",
+        "/bin/bash -s",
+    ]
+    script_call = next(i for i, call in enumerate(runner.calls) if call[-1] == "/bin/bash -s")
+    assert runner.stdins[script_call] == "echo hi\n"
+    assert outcome.env["gatekeeper"] == "enabled"
+    env = json.loads((tmp_path / "out" / "env.json").read_text(encoding="utf-8"))
+    assert env["gatekeeper"] == "enabled"
+    assert outcome.command.stdout == "script output\n"
+
+
+def test_run_stops_before_the_script_when_gatekeeper_cannot_be_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, runner = run_engine(
+        tmp_path,
+        monkeypatch,
+        ("spctl --global-enable", result_of("", 1, "operation not permitted")),
+    )
+    with pytest.raises(
+        ProofError, match=r"enabling Gatekeeper failed \(1\): operation not permitted"
+    ):
+        engine.run("first-run", script="echo hi\n", timeout=30)
+    assert "/bin/bash -s" not in guest_commands(runner)
+    assert any(c.startswith("delete wsrun-first-run-") for c in runner.tart_calls())
+    assert not engine.vm_lock.exists()
+
+
+def test_run_stops_before_the_script_when_gatekeeper_stays_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, runner = run_engine(
+        tmp_path, monkeypatch, ("spctl --status", result_of(GATEKEEPER_OFF))
+    )
+    with pytest.raises(ProofError, match="Gatekeeper is not enabled"):
+        engine.run("first-run", script="echo hi\n", timeout=30)
+    assert "/bin/bash -s" not in guest_commands(runner)
+
+
+def test_run_reports_a_failing_script_without_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine, runner = run_engine(tmp_path, monkeypatch, ("/bin/bash -s", result_of("", 7, "boom")))
+    outcome = engine.run("first-run", script="exit 7\n", timeout=30)
+    assert outcome.command.exit_code == 7
+    assert any(c.startswith("delete wsrun-first-run-") for c in runner.tart_calls())
