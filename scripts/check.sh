@@ -15,6 +15,7 @@ set -euo pipefail
 #   scripts/check.sh secrets       # Scan the full Git history with gitleaks
 #   scripts/check.sh commits       # Validate commit messages (CHECK_BASE_SHA bounds the range)
 #   scripts/check.sh agent-files   # Validate the agent instruction files
+#   scripts/check.sh emails        # Refuse real email addresses in tracked files
 #   scripts/check.sh powershell    # Lint start.ps1 with PSScriptAnalyzer
 #   scripts/check.sh bash32        # Run the start.sh sandbox tests (macOS only)
 #   scripts/check.sh windows       # Run the Windows starter tests (Windows only)
@@ -42,13 +43,13 @@ RUFF_VERSION="0.17.4"
 MYPY_VERSION="2.4.1"
 PSSA_VERSION="1.25.0"
 POWERSHELL_IMAGE="mcr.microsoft.com/powershell@sha256:042240d57ec9e47e511033b92625a8d95875ee5860af3015992c248b58a8be81"
-ALL_CHECKS=(shellcheck python tests secrets commits agent-files powershell)
+ALL_CHECKS=(shellcheck python tests secrets commits agent-files emails powershell)
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 show_help() {
   cat <<EOF
-Usage: $(basename "$0") [shellcheck|python|tests|secrets|commits|agent-files|powershell|bash32|windows|all]
+Usage: $(basename "$0") [shellcheck|python|tests|secrets|commits|agent-files|emails|powershell|bash32|windows|all]
 
 Runs the repository checks. With no argument, runs every check and reports each failure.
 
@@ -104,6 +105,10 @@ run_agent_files() {
   (cd "${REPO_ROOT}" && uv run --no-project scripts/check_agent_files.py)
 }
 
+run_emails() {
+  (cd "${REPO_ROOT}" && uv run --no-project scripts/check_emails.py)
+}
+
 # PSScriptAnalyzer must report nothing for start.ps1 under PSScriptAnalyzerSettings.psd1.
 run_powershell() {
   local analyze
@@ -156,6 +161,7 @@ run_named() {
     secrets) run_secrets ;;
     commits) run_commits ;;
     agent-files) run_agent_files ;;
+    emails) run_emails ;;
     powershell) run_powershell ;;
     bash32) run_bash32 ;;
     windows) run_windows ;;
@@ -188,11 +194,11 @@ main() {
     all)
       run_all
       ;;
-    shellcheck | python | tests | secrets | commits | agent-files | powershell | bash32 | windows)
+    shellcheck | python | tests | secrets | commits | agent-files | emails | powershell | bash32 | windows)
       run_named "${target}"
       ;;
     *)
-      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|commits|agent-files|powershell|bash32|windows|all]" >&2
+      echo "usage: scripts/check.sh [shellcheck|python|tests|secrets|commits|agent-files|emails|powershell|bash32|windows|all]" >&2
       return 2
       ;;
   esac

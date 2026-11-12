@@ -61,9 +61,7 @@ def test_valid_messages_pass(text: str) -> None:
         ("feat(start): add the thing\nbody right below\n", "second line must be blank"),
         (message("feat(start): add", "word " * 20), "wrap body lines at 72"),
         (
-            message(
-                "feat(start): add", f"{BODY}\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
-            ),
+            message("feat(start): add", f"{BODY}\n\nCo-Authored-By: Claude <noreply@example.com>"),
             "attribution",
         ),
         (

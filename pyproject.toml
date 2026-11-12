@@ -13,6 +13,7 @@ select = ["E", "F", "I", "UP", "B", "BLE", "SIM", "S", "ARG"]
 "start_base.py" = ["S603"]
 "start_windows.py" = ["S603"]
 "scripts/check_commits.py" = ["S603", "S607"]
+"scripts/check_emails.py" = ["S603", "S607"]
 # Tests assert, run git and the shell with argument lists, use fixed fake paths, and implement
 # fakes whose signatures must match the interface they stand in for.
 "tests/**" = ["S101", "S603", "S607", "S108", "ARG"]
