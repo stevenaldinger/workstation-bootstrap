@@ -32,6 +32,29 @@ MESSAGES: dict[str, str] = {
     "step.retry": "Press Enter to try again.",
     "choice.invalid": "Type a number from 1 to {count} and press Enter.",
     "input.ended": "Input ended before {step} finished; run the same command again to resume.",
+    "clt.title": "Install the Command Line Tools",
+    "clt.present": "The Command Line Tools are already installed.",
+    "clt.reason": (
+        "The Command Line Tools, Apple's compiler and Git, are not installed. They install now "
+        "through Apple's software update, which uses the administrator access already granted, "
+        "needs no clicks, and takes several minutes."
+    ),
+    "clt.not-listed": (
+        "Apple's software update lists no Command Line Tools, so they were not installed. "
+        "Check the network connection, then run the same command again. If it lists none "
+        "again, install the tools from developer.apple.com/download/all and run the same "
+        "command again."
+    ),
+    "clt.install-failed": (
+        "Installing {label} failed with exit status {code}. Run the same command again. If it "
+        "fails again, install the Command Line Tools from developer.apple.com/download/all "
+        "and run the same command again."
+    ),
+    "clt.failed": "The Command Line Tools install could not start: {detail}",
+    "clt.still-missing": (
+        "The Command Line Tools were installed, but xcode-select still reports no developer "
+        "tools. Run the same command again."
+    ),
     "stage1.title": "Install the password manager, Git, and the GitHub CLI",
     "stage1.failed": "Installing the stage-1 packages failed: {detail}",
     "sign-in.title": "Sign in to the personal 1Password account",

@@ -135,7 +135,17 @@ def build_machine(
     bin_dir = tmp_path / "bin"
     fake_dir = tmp_path / "fake"
     fake_dir.mkdir()
-    for tool in ("op", "gh", "ssh", "open", "mise", *tools):
+    for tool in (
+        "op",
+        "gh",
+        "ssh",
+        "open",
+        "mise",
+        "sudo",
+        "xcode-select",
+        "softwareupdate",
+        *tools,
+    ):
         install_fake(bin_dir, tool)
     (fake_dir / "world.json").write_text(json.dumps(fake_tools.DEFAULT_WORLD), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))

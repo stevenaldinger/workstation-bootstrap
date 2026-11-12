@@ -13,7 +13,7 @@ Claude Code reads this file at the start of every session, and it needs Claude C
 - The starter cannot change without its pin changing: `start.sh` and `start.ps1` each pin the checksum of `start.sha256`, which lists the checksum of every other starter file, and each bootstrap command pins the commit and checksum of its script.
 - Nothing trusts a host key on first use: ssh runs with `StrictHostKeyChecking=yes` and the keys in `github_known_hosts`.
 - The tests never reach a real Homebrew, winget, 1Password, or GitHub; they run the starter against fake commands. On Windows the fakes are compiled `.exe` files, because Windows starts a command by file name only when it is an executable.
-- Only `elevate` in `start_windows.py` asks Windows for administrator rights, and it states the reason first. A restart happens only after the person chooses it.
+- Only `elevate` in `start_windows.py` asks Windows for administrator rights, and it states the reason first. On a Mac, only `start_macos.py` runs elevated commands (`sudo`), for the Command Line Tools, and it states the reason first and never opens the installer dialog. A restart happens only after the person chooses it.
 - Every commit message is a Conventional Commit with a body (see the README).
 
 ## Layout
@@ -22,7 +22,7 @@ Claude Code reads this file at the start of every session, and it needs Claude C
 |------|-------|
 | `start.sh` | The only Bash: checks the Mac, installs mise, Python, uv, and gh, then runs `start.py` |
 | `start.ps1` | The only PowerShell: the same for Windows, and the target of the sign-in restart entry |
-| `start.py` | The entrypoint, with the sibling modules `start_base.py`, `start_config.py`, `start_packages.py`, `start_identity.py`, `start_clone.py`, and `start_windows.py` (the Windows host steps) |
+| `start.py` | The entrypoint, with the sibling modules `start_base.py`, `start_config.py`, `start_packages.py`, `start_identity.py`, `start_clone.py`, `start_macos.py` (the Mac host step), and `start_windows.py` (the Windows host steps) |
 | `start.toml`, `stage1.toml`, `stage1-windows.toml` | The starter's settings and its stage-1 package lists |
 | `github_known_hosts` | GitHub's pinned SSH host keys |
 | `start.sha256` | The checksum of each file `start.sh` downloads |

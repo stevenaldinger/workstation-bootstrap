@@ -61,6 +61,7 @@ Pinned by version here, downloaded and verified by mise:
 Delegated, not pinned:
 
 - On a Mac, the 1Password app, the 1Password command line, and Git, listed in `stage1.toml` at `latest`. mise installs them as a Homebrew cask and formulae. It checks a formula's download against Homebrew's published sha256 and a cask's when the cask provides one, and the versions are whatever Homebrew serves that day.
+- On a Mac, the Command Line Tools, only when `xcode-select -p` finds none. `softwareupdate` downloads them from Apple's update servers and checks Apple's signature; this repository does not check those bytes.
 - On Windows, the same three, listed in `stage1-windows.toml` with exact winget versions. mise runs `winget install --exact --version`, and winget checks each installer against the SHA-256 in its package manifest. The installers ask Windows for administrator approval, because they install for every user.
 - On Windows, the winget client itself, only on a computer that lacks it (a Windows 11 Pro computer ships winget, so a normal client never takes this path). `start.ps1` first registers the App Installer that Windows already holds, and otherwise installs the `Microsoft.WinGet.Client` module from the PowerShell Gallery at a pinned version and lets it repair winget. That is pinned by version, with the signature checked by Windows.
 - The private repository's contents, which the owner trusts by cloning it over the pinned host key into `~/.config/mise`.
@@ -84,13 +85,14 @@ Every download uses `curl` with `--proto '=https' --tlsv1.2`, connection and tot
 
 `start.py` uses only the standard library. Every step checks the machine first and does nothing when the check already passes, so a re-run resumes at the first step that is not yet satisfied:
 
-1. Install the packages in `stage1.toml`: the 1Password app and command line, and Git.
-2. Sign in to the personal 1Password account.
-3. Turn on the 1Password command-line integration and the SSH agent.
-4. Create the SSH key `GitHub SSH (workstation)` in the personal Private vault, and write its public half to `~/.ssh/github_workstation.pub`. The vault is searched by exact title first, and a failed search stops the run instead of creating a second key. No private key file is ever written.
-5. Register the key with GitHub through the GitHub CLI, after the one-time-code approval, then drop the key-registration scope from the token and verify the SSH handshake through the 1Password agent. A token that keeps the scope stops the run with the command to remove it, and a repeated run finishes the removal.
-6. Clone the private repository to `~/.config/mise` over SSH and set its hook directory. An existing checkout of the same remote is fast-forwarded; any other non-empty directory stops the run with its path.
-7. Hand off to `~/.config/mise/bin/ws bootstrap`.
+1. Install the Command Line Tools, Apple's compiler and Git, unless `xcode-select -p` already names a developer folder. They install headless through Apple's `softwareupdate`, the way the Homebrew installer installs them, so no dialog opens and no click is needed. A failure stops the run with a message and what to do next.
+2. Install the packages in `stage1.toml`: the 1Password app and command line, and Git.
+3. Sign in to the personal 1Password account.
+4. Turn on the 1Password command-line integration and the SSH agent.
+5. Create the SSH key `GitHub SSH (workstation)` in the personal Private vault, and write its public half to `~/.ssh/github_workstation.pub`. The vault is searched by exact title first, and a failed search stops the run instead of creating a second key. No private key file is ever written.
+6. Register the key with GitHub through the GitHub CLI, after the one-time-code approval, then drop the key-registration scope from the token and verify the SSH handshake through the 1Password agent. A token that keeps the scope stops the run with the command to remove it, and a repeated run finishes the removal.
+7. Clone the private repository to `~/.config/mise` over SSH and set its hook directory. An existing checkout of the same remote is fast-forwarded; any other non-empty directory stops the run with its path.
+8. Hand off to `~/.config/mise/bin/ws bootstrap`.
 
 Commands the starter runs on its own have time limits, so a stuck `op`, `gh`, or `git` ends the run with a message. A command a person is completing, such as the GitHub sign-in, has none.
 
@@ -135,6 +137,7 @@ Two environment variables exist for the clean-machine proof, which runs on a hos
 | `start.ps1` | The only PowerShell: the same for Windows, and the restart entry's target |
 | `start.py` | The entrypoint: argument parsing and the order of the steps |
 | `start_base.py`, `start_config.py`, `start_packages.py`, `start_identity.py`, `start_clone.py` | Shared plumbing, the settings loader, the package install, the identity steps, and the clone and hand-off |
+| `start_macos.py` | The Mac host: the Command Line Tools |
 | `start_windows.py` | The Windows host: WSL and the restart, elevation, the SSH agent service, and PATH |
 | `start.toml`, `stage1.toml`, `stage1-windows.toml` | The starter's settings and its package lists |
 | `github_known_hosts` | GitHub's pinned SSH host keys |

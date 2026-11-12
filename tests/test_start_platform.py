@@ -189,4 +189,4 @@ def test_the_default_platform_follows_the_operating_system(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sys, "platform", "darwin")
-    assert start.select_platform() is base.MACOS
+    assert start.select_platform().name == "macos"

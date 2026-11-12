@@ -90,7 +90,19 @@ DEFAULT_WORLD: World = {
     "agent_service": {"present": True, "running": False, "start_type": "DEMAND_START"},
     "stage1_installed": False,
     "mise_apply_fails": False,
+    # The Command Line Tools: installed, the labels `softwareupdate -l` lists while the marker
+    # file exists, the exit status of `softwareupdate -i`, and whether a clean install leaves
+    # the tools in place.
+    "clt": {
+        "installed": True,
+        "marker": False,
+        "labels": [],
+        "install_exit": 0,
+        "installs": True,
+    },
 }
+CLT_MARKER = "/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress"
+CLT_FOLDER = "/Library/Developer/CommandLineTools"
 
 GH_LOGIN_FLAGS = {
     "--hostname": 1,
@@ -321,13 +333,70 @@ def open_(argv: list[str], _world: World) -> int:
     return 0 if argv and (argv[0] == "-a" or "://" in argv[0]) else unsupported("open", argv)
 
 
-def sudo(argv: list[str], _world: World) -> int:
-    """`sudo -v` and `sudo -n true`; FAKE_SUDO_REFRESH_FAILS makes the refresh fail."""
+def sudo(argv: list[str], world: World) -> int:
+    """`sudo -v`, `sudo -n true`, and the elevated commands that install the Command Line Tools.
+
+    FAKE_SUDO_REFRESH_FAILS makes the refresh fail. Only the marker file, `softwareupdate -i`,
+    and `xcode-select --switch` are modeled; each runs as its own call in the log.
+    """
     if argv == ["-v"]:
         return 1 if os.environ.get("FAKE_SUDO_FAILS") else 0
     if argv == ["-n", "true"]:
         return 1 if os.environ.get("FAKE_SUDO_REFRESH_FAILS") else 0
+    if argv and argv[0] in ("touch", "rm", "softwareupdate", "xcode-select"):
+        return elevated(argv, world)
     return unsupported("sudo", argv)
+
+
+def elevated(argv: list[str], world: World) -> int:
+    """A command run through sudo, logged as its own call."""
+    with CALLS_FILE.open("a", encoding="utf-8") as log:
+        log.write(json.dumps([*argv, {"elevated": True}]) + "\n")
+    clt = world["clt"]
+    if argv == ["touch", CLT_MARKER]:
+        clt["marker"] = True
+    elif argv == ["rm", "-f", CLT_MARKER]:
+        clt["marker"] = False
+    elif argv[:2] == ["softwareupdate", "-i"] and len(argv) == 3:
+        if argv[2] not in clt["labels"]:
+            return fail(f"No such update: {argv[2]}")
+        if clt["install_exit"]:
+            return fail("Install failed", clt["install_exit"])
+        clt["installed"] = clt["installs"]
+    elif argv == ["xcode-select", "--switch", CLT_FOLDER]:
+        if not clt["installed"]:
+            return fail("xcode-select: error: invalid developer directory")
+    else:
+        return unsupported("sudo", argv)
+    save(world)
+    return 0
+
+
+def xcode_select(argv: list[str], world: World) -> int:
+    """`xcode-select -p`: the developer folder, or the real tool's failure when none is set."""
+    if argv != ["-p"]:
+        return unsupported("xcode-select", argv)
+    if world["clt"]["installed"]:
+        print(CLT_FOLDER)
+        return 0
+    return fail("xcode-select: error: unable to get active developer directory", 2)
+
+
+def softwareupdate(argv: list[str], world: World) -> int:
+    """`softwareupdate -l`; like the real tool it lists Command Line Tools only while the marker
+    file exists."""
+    if argv != ["-l"]:
+        return unsupported("softwareupdate", argv)
+    print("Software Update Tool\n\nFinding available software")
+    labels = world["clt"]["labels"] if world["clt"]["marker"] else []
+    if not labels:
+        print("No new software available.")
+        return 0
+    print("Software Update found the following new or updated software:")
+    for label in labels:
+        print(f"* Label: {label}")
+        print(f"\tTitle: {label.rsplit('-', 1)[0]}, Version: 1.0, Size: 1KiB, Recommended: YES,")
+    return 0
 
 
 # Short options may be combined, as in `-fsSL`.
@@ -506,6 +575,8 @@ HANDLERS = {
     "mise": mise,
     "open": open_,
     "sudo": sudo,
+    "xcode-select": xcode_select,
+    "softwareupdate": softwareupdate,
     "curl": curl,
     "uname": uname,
     "sw_vers": sw_vers,

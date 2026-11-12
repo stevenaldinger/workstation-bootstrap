@@ -19,10 +19,11 @@ The modules sit side by side, not in a package, because `start.sh` downloads exa
 listed in `start.sha256` into one folder and runs this file from it, so Python finds its
 siblings there. `start_base.py` holds the shared plumbing, `start_config.py` loads
 `start.toml`, `start_packages.py` installs the stage-1 packages, `start_identity.py` holds the
-identity steps, `start_clone.py` clones and hands off, and `start_windows.py` holds the
-Windows host's own steps: WSL, the restart, elevation, and the SSH agent service. The
-`WS_KEEP_SSH_AGENT_SERVICE=1` environment variable keeps that service running; the clean-machine
-proof sets it because its stand-in SSH agent is that service.
+identity steps, `start_clone.py` clones and hands off, `start_macos.py` installs the Command
+Line Tools on a Mac, and `start_windows.py` holds the Windows host's own steps: WSL, the
+restart, elevation, and the SSH agent service. The `WS_KEEP_SSH_AGENT_SERVICE=1` environment
+variable keeps that service running; the clean-machine proof sets it because its stand-in SSH
+agent is that service.
 """
 
 from __future__ import annotations
@@ -36,7 +37,6 @@ from pathlib import Path
 from start_base import (
     EXIT_FAILED,
     EXIT_INPUT_ENDED,
-    MACOS,
     MESSAGES,
     Console,
     Context,
@@ -66,7 +66,9 @@ def select_platform() -> Platform:
         from start_windows import windows_platform
 
         return windows_platform()
-    return MACOS
+    from start_macos import macos_platform
+
+    return macos_platform()
 
 
 def host_steps(ctx: Context, steps: Sequence[NamedStep]) -> list[tuple[str, Callable[[], None]]]:

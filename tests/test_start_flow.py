@@ -157,9 +157,9 @@ def test_every_step_prints_its_position_out_of_the_total(machine: Machine, mirro
     session = make_session()
     run_starter(machine, session, mirror, Recorder(), Exec())
     headings = [line for line in session.lines if HEADING_RE.match(line)]
-    assert len(headings) == 7
-    assert headings[0].startswith("[1/7] ")
-    assert headings[-1].startswith("[7/7] ")
+    assert len(headings) == 8
+    assert headings[0].startswith("[1/8] ")
+    assert headings[-1].startswith("[8/8] ")
 
 
 def test_the_clone_uses_the_agent_and_sets_the_hooks_path(machine: Machine, mirror: Path) -> None:
