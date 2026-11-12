@@ -11,12 +11,15 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
-from prove_engine.logic import (
-    parse_vnc_address,
-    ssh_argv,
-    tart_run_argv,
+from prove_engine.logic import parse_vnc_address, ssh_argv, tart_run_argv
+from prove_engine.model import (
+    Base,
+    CommandResult,
+    ProcessHandle,
+    ProofError,
+    Share,
+    VncAddress,
 )
-from prove_engine.model import Base, CommandResult, ProofError, Share, VncAddress
 from prove_engine.pins import (
     BASE_PREFIX,
     GUEST_PASSWORD,
@@ -43,8 +46,13 @@ class Machine:
         self.ip: str | None = None
         # Whether the machine serves its screen over VNC; kept so a snapshot boots the same way.
         self.vnc = False
-        self._proc: subprocess.Popen[bytes] | None = None
+        self._proc: ProcessHandle | None = None
         self._log: IO[bytes] | None = None
+
+    @property
+    def pid(self) -> int | None:
+        """The process id of the running guest, or None when it is not running."""
+        return self._proc.pid if self._proc is not None and self._proc.poll() is None else None
 
     @property
     def log_path(self) -> Path:
@@ -63,14 +71,7 @@ class Machine:
         self._log = self.log_path.open("wb")
         argv = tart_run_argv(self.engine.tart, self.name, self.shares, vnc=self.vnc)
         mark = time.monotonic()
-        self._proc = subprocess.Popen(
-            argv,
-            env=self.engine.env,
-            stdout=self._log,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        self._proc = self.engine.spawner(argv, env=self.engine.env, log=self._log)
         deadline = mark + IP_WAIT_SECONDS
         while self.ip is None:
             self._raise_if_exited()

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from prove_engine.disk import grow_layout, grow_system_container
+from prove_engine.lock import HostLock, clear_if_stale, held_message, pid_alive, read_owner
 from prove_engine.logic import (
     check_free_space,
     check_host,
@@ -24,7 +25,16 @@ from prove_engine.logic import (
     verify_sha256,
 )
 from prove_engine.machine import Machine
-from prove_engine.model import Base, CommandResult, HostInfo, ProofError, Runner, RunResult, Share
+from prove_engine.model import (
+    Base,
+    CommandResult,
+    HostInfo,
+    ProofError,
+    Runner,
+    RunResult,
+    Share,
+    Spawner,
+)
 from prove_engine.pins import (
     BASE_PREFIX,
     DEFAULT_COMMAND,
@@ -36,7 +46,7 @@ from prove_engine.pins import (
     TART_URL,
     TART_VERSION,
 )
-from prove_engine.process import run_command, utc_stamp
+from prove_engine.process import run_command, spawn_process, utc_stamp
 from prove_engine.toolchain import download, unpack_tart
 
 
@@ -47,9 +57,13 @@ class Engine:
         *,
         host: HostInfo,
         env: Mapping[str, str],
+        vm_lock: Path,
         runner: Runner = run_command,
+        spawner: Spawner = spawn_process,
     ) -> None:
         self.cache_root = cache_root
+        self.vm_lock = vm_lock
+        self.spawner = spawner
         self.host = host
         self.runner = runner
         self.tart_home = cache_root / "tart-home"
@@ -111,15 +125,29 @@ class Engine:
 
     @contextmanager
     def machine(self, scenario: str, base: Base) -> Iterator[Machine]:
-        """Clone the base for one run and always delete the clone afterwards."""
-        self.tart_home.mkdir(parents=True, exist_ok=True)
-        check_free_space(shutil.disk_usage(self.tart_home).free, FREE_GB_PER_RUN)
-        vm = Machine(self, machine_name(scenario, utc_stamp()), base)
-        self.checked("clone", base.name, vm.name)
+        """Clone the base for one run and always delete the clone afterwards.
+
+        The host VM lock is held from before the clone until the clone is deleted, so a second
+        run on this host fails fast instead of booting a second VM. A kept guest hands the lock
+        to its own process.
+        """
+        lock = HostLock(self.vm_lock, scenario)
+        lock.acquire()
+        vm: Machine | None = None
         try:
-            yield vm
+            self.tart_home.mkdir(parents=True, exist_ok=True)
+            check_free_space(shutil.disk_usage(self.tart_home).free, FREE_GB_PER_RUN)
+            vm = Machine(self, machine_name(scenario, utc_stamp()), base)
+            self.checked("clone", base.name, vm.name)
+            try:
+                yield vm
+            finally:
+                vm.destroy()
         finally:
-            vm.destroy()
+            if vm is not None and vm.keep and vm.pid is not None:
+                lock.hand_over(vm.pid)
+            else:
+                lock.release()
 
     def run(
         self,
@@ -165,7 +193,11 @@ class Engine:
         return stale
 
     def cleanup(self, *, purge: bool = False) -> list[str]:
+        owner = read_owner(self.vm_lock)
+        if self.vm_lock.exists() and (owner is None or (pid_alive(owner.pid) and not owner.kept)):
+            raise ProofError(held_message(self.vm_lock, owner))
         reaped = self.reap() if self.tart.exists() else []
+        clear_if_stale(self.vm_lock)
         if purge:
             shutil.rmtree(self.cache_root, ignore_errors=True)
         return reaped

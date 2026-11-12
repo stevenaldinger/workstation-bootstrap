@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import IO, Any, Protocol
 
 
 class ProofError(Exception):
@@ -80,4 +80,36 @@ class RunResult:
     kept: bool = False
 
 
-Runner = Callable[..., CommandResult]
+class Runner(Protocol):
+    """Runs a command to completion and returns what it printed."""
+
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        stdin: str | None = None,
+    ) -> CommandResult: ...
+
+
+class ProcessHandle(Protocol):
+    """What the engine needs from a started process."""
+
+    @property
+    def pid(self) -> int: ...
+
+    @property
+    def returncode(self) -> int | None: ...
+
+    def poll(self) -> int | None: ...
+
+    def wait(self, timeout: float | None = None) -> int: ...
+
+
+class Spawner(Protocol):
+    """Starts a long-running process that outlives the call (the guest's `tart run`)."""
+
+    def __call__(
+        self, argv: Sequence[str], *, env: Mapping[str, str], log: IO[bytes]
+    ) -> ProcessHandle: ...

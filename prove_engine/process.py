@@ -9,8 +9,9 @@ import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from typing import IO
 
-from prove_engine.model import CommandResult, HostInfo, ProofError
+from prove_engine.model import CommandResult, HostInfo, ProcessHandle, ProofError
 from prove_engine.pins import EXIT_TIMED_OUT
 
 
@@ -46,6 +47,21 @@ def run_command(
     return CommandResult(
         tuple(argv), code, out or "", err or "", timed_out, time.monotonic() - started
     )
+
+
+def spawn_process(argv: Sequence[str], *, env: Mapping[str, str], log: IO[bytes]) -> ProcessHandle:
+    """Start argv detached in its own session, writing its output to log."""
+    try:
+        return subprocess.Popen(
+            list(argv),
+            env=dict(env),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        raise ProofError(f"cannot start {argv[0]}: {exc}") from exc
 
 
 def utc_stamp() -> str:

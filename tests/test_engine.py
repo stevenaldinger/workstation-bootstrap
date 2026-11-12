@@ -77,7 +77,13 @@ def test_base_pulls_and_clones_once_then_reuses(
 
 
 def test_base_refuses_a_host_that_is_not_apple_silicon(tmp_path: Path) -> None:
-    engine = Engine(tmp_path, host=HostInfo(0, "x86_64", "Linux"), env={}, runner=FakeRunner())
+    engine = Engine(
+        tmp_path,
+        host=HostInfo(0, "x86_64", "Linux"),
+        env={},
+        vm_lock=tmp_path / "vm.lock",
+        runner=FakeRunner(),
+    )
     with pytest.raises(ProofError, match="Apple Silicon"):
         engine.base()
 

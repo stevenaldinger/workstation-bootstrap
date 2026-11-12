@@ -107,6 +107,8 @@ uv run prove.py cleanup
 uv run prove.py cleanup --purge
 ```
 
+Only one VM runs at a time on a host. A run takes the lock folder `~/.cache/workstation-bootstrap/vm.lock` (an atomic `mkdir`, with the owner's process id inside) before it clones, and a second run fails at once, naming the run that holds it. A lock whose process is gone is taken over. A guest left running by `--keep-vm` keeps the lock until its process ends. If a folder with no owner file blocks a run and no VM is running, remove it with `rmdir`.
+
 Shares appear in the guest under `/Volumes/My Shared Files/<name>`. Every run enables Gatekeeper first, because the vanilla image ships with it off. `--out` writes `env.json` (guest macOS version and architecture, image digest, Tart version, host version), `timings.json`, `result.json`, and the command's output. `prove.py` exits 0 when the guest command succeeds, 1 when it fails or times out, and 2 on an engine error.
 
 The engine is also a Python API for test suites: `from prove_engine import Engine, Share, host_info`. `Engine.base()`, `Engine.machine()` (a context manager that always deletes its clone), and `Engine.run()` cover the lifecycle. A `Machine` offers `start`, `run`, `snapshot`, `restore`, and `destroy`. A snapshot flushes the guest's disk, stops the machine, copies its disk, and boots it again, so it includes a reboot. Share a folder with `--share` to move files in or out.

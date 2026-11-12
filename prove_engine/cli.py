@@ -16,6 +16,9 @@ from prove_engine.model import ProofError
 from prove_engine.pins import DEFAULT_COMMAND, RUN_PREFIX
 from prove_engine.process import host_info
 
+# One VM runs at a time on a host, whatever cache root a run uses, so the lock sits beside it.
+DEFAULT_VM_LOCK = Path.home() / ".cache" / "workstation-bootstrap" / "vm.lock"
+
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -84,7 +87,9 @@ def dispatch(args: argparse.Namespace, engine: Engine) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
-    engine = Engine(args.cache_root, host=host_info(), env=dict(os.environ))
+    engine = Engine(
+        args.cache_root, host=host_info(), env=dict(os.environ), vm_lock=DEFAULT_VM_LOCK
+    )
     try:
         return dispatch(args, engine)
     except ProofError as exc:

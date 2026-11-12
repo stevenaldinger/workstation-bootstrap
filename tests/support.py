@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import IO
 
 import pytest
 
@@ -47,12 +48,52 @@ class FakeRunner:
         return [" ".join(call[1:]) for call in self.calls if call[0].endswith("/tart")]
 
 
+class FakeProcess:
+    """A started process that stays alive until `finish` is called."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self.returncode: int | None = None
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode if self.returncode is not None else 0
+
+    def finish(self, code: int = 0) -> None:
+        self.returncode = code
+
+
+class FakeSpawner:
+    """Records started processes instead of running them."""
+
+    def __init__(self) -> None:
+        self.started: list[tuple[str, ...]] = []
+        self.processes: list[FakeProcess] = []
+
+    def __call__(
+        self, argv: Sequence[str], *, env: Mapping[str, str], log: IO[bytes]
+    ) -> FakeProcess:
+        self.started.append(tuple(argv))
+        process = FakeProcess(900000 + len(self.processes))
+        self.processes.append(process)
+        return process
+
+
 def result_of(stdout: str, code: int = 0, stderr: str = "") -> CommandResult:
     return CommandResult(("x",), code, stdout, stderr)
 
 
-def make_engine(tmp_path: Path, runner: FakeRunner) -> Engine:
-    return Engine(tmp_path / "cache", host=APPLE_SILICON, env={"PATH": "/usr/bin"}, runner=runner)
+def make_engine(tmp_path: Path, runner: FakeRunner, spawner: FakeSpawner | None = None) -> Engine:
+    return Engine(
+        tmp_path / "cache",
+        host=APPLE_SILICON,
+        env={"PATH": "/usr/bin"},
+        vm_lock=tmp_path / "vm.lock",
+        runner=runner,
+        spawner=spawner or FakeSpawner(),
+    )
 
 
 def stage_unpacked_tart(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
