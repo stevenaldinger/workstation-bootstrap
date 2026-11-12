@@ -31,13 +31,16 @@ class Recorder:
 
     def __init__(self) -> None:
         self.commands: list[list[str]] = []
+        self.environments: list[Mapping[str, str]] = []
 
     def run(self, argv: Sequence[str], env: Mapping[str, str] | None = None) -> base.Completed:
         self.commands.append(list(argv))
+        self.environments.append(dict(env or {}))
         return base.run_captured(argv, env)
 
     def stream(self, argv: Sequence[str], env: Mapping[str, str] | None = None) -> int:
         self.commands.append(list(argv))
+        self.environments.append(dict(env or {}))
         return base.run_streamed(argv, env)
 
     def index(self, *prefix: str) -> int:
@@ -116,6 +119,27 @@ def test_a_fresh_machine_reaches_the_identity_before_the_clone(
     assert handoff.calls == [
         (str(clone_dir / "bin" / "ws"), [str(clone_dir / "bin" / "ws"), "bootstrap"])
     ]
+
+
+def test_stage_one_reads_only_its_own_package_list(machine: Machine, mirror: Path) -> None:
+    # A config directory holding the cloned repository's declarations would widen stage 1 to
+    # every declared package on a re-run, so the directory it reads is empty.
+    session = make_session(
+        lambda: machine.sign_in(PERSONAL_ACCOUNT),
+        lambda: machine.integrations(on=True),
+    )
+    recorder = Recorder()
+    run_starter(machine, session, mirror, recorder, Exec())
+    stage1 = [
+        env
+        for command, env in zip(recorder.commands, recorder.environments, strict=True)
+        if command[:3] == ["mise", "bootstrap", "packages"]
+    ]
+    assert len(stage1) == 2
+    for env in stage1:
+        assert env["MISE_GLOBAL_CONFIG_FILE"].endswith("stage1.toml")
+        assert env["MISE_CONFIG_DIR"]
+    assert not Path(stage1[0]["MISE_CONFIG_DIR"]).exists(), "the empty directory is removed"
 
 
 def test_every_step_prints_its_position_out_of_the_total(machine: Machine, mirror: Path) -> None:

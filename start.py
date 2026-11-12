@@ -20,6 +20,7 @@ import argparse
 import os
 import shlex
 import sys
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
@@ -86,13 +87,17 @@ def clone_repository(ctx: Context, url: str) -> None:
 
 def install_stage1(ctx: Context, stage1: Path) -> None:
     """Install the stage-1 packages unless `mise bootstrap packages status` finds none missing."""
-    environment = {"MISE_GLOBAL_CONFIG_FILE": str(stage1)}
-    status = ctx.run(["mise", "bootstrap", "packages", "status", "--missing"], environment)
-    if status.returncode == 0:
-        return
-    code = ctx.stream(["mise", "bootstrap", "packages", "apply", "--yes"], environment)
-    if code != 0:
-        raise StageError(MESSAGES["stage1.failed"].format(detail=f"exit {code}"))
+    # Mise merges every file in its config directory with the global file, so once the clone
+    # exists a re-run would see all declared packages. An empty directory keeps this stage to
+    # the stage-1 list.
+    with tempfile.TemporaryDirectory(prefix="stage1-") as empty:
+        environment = {"MISE_GLOBAL_CONFIG_FILE": str(stage1), "MISE_CONFIG_DIR": empty}
+        status = ctx.run(["mise", "bootstrap", "packages", "status", "--missing"], environment)
+        if status.returncode == 0:
+            return
+        code = ctx.stream(["mise", "bootstrap", "packages", "apply", "--yes"], environment)
+        if code != 0:
+            raise StageError(MESSAGES["stage1.failed"].format(detail=f"exit {code}"))
 
 
 def hand_off(ctx: Context, extra: Sequence[str], execv: Execv) -> None:
