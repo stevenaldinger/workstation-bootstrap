@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, Protocol
@@ -91,6 +91,10 @@ class Runner(Protocol):
         timeout: float | None = None,
         stdin: str | None = None,
     ) -> CommandResult: ...
+
+
+# Free bytes on the volume holding a path.
+FreeSpace = Callable[[Path], int]
 
 
 class ProcessHandle(Protocol):

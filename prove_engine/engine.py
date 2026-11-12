@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -29,6 +28,7 @@ from prove_engine.machine import Machine
 from prove_engine.model import (
     Base,
     CommandResult,
+    FreeSpace,
     HostInfo,
     ProofError,
     Runner,
@@ -59,11 +59,13 @@ class Engine:
         host: HostInfo,
         env: Mapping[str, str],
         vm_lock: Path,
+        free_space: FreeSpace,
         runner: Runner = run_command,
         spawner: Spawner = spawn_process,
     ) -> None:
         self.cache_root = cache_root
         self.vm_lock = vm_lock
+        self.free_space = free_space
         self.spawner = spawner
         self.host = host
         self.runner = runner
@@ -109,7 +111,7 @@ class Engine:
         name = f"{BASE_PREFIX}{image.major}"
         if name not in self.local_vms():
             self.tart_home.mkdir(parents=True, exist_ok=True)
-            check_free_space(shutil.disk_usage(self.tart_home).free, FREE_GB_FIRST_PULL)
+            check_free_space(self.free_space(self.tart_home), FREE_GB_FIRST_PULL)
             self.checked("pull", image.ref)
             self.checked("clone", image.ref, name)
         self.ensure_disk(name)
@@ -139,7 +141,7 @@ class Engine:
         try:
             claim_root(self.cache_root)
             self.tart_home.mkdir(parents=True, exist_ok=True)
-            check_free_space(shutil.disk_usage(self.tart_home).free, FREE_GB_PER_RUN)
+            check_free_space(self.free_space(self.tart_home), FREE_GB_PER_RUN)
             vm = Machine(self, machine_name(scenario, utc_stamp()), base)
             self.checked("clone", base.name, vm.name)
             try:

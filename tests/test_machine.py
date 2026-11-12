@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import time
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from prove_engine import (
     ProofError,
     Share,
     VncAddress,
+    host_free_bytes,
     pins,
     run_command,
     select_image,
@@ -24,6 +26,14 @@ from prove_engine import (
 from prove_engine.model import Base
 
 # --- Timeouts and process handling ---------------------------------------------------
+
+
+def test_host_free_bytes_reports_the_volume_free_space(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    usage = shutil._ntuple_diskusage(100, 40, 60)
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: usage)
+    assert host_free_bytes(tmp_path) == 60
 
 
 def test_run_command_returns_output_and_exit_code() -> None:

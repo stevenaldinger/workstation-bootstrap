@@ -25,7 +25,7 @@ from prove_engine.model import (
     Share,
     VncAddress,
 )
-from prove_engine.process import host_info, run_command
+from prove_engine.process import host_free_bytes, host_info, run_command
 
 __all__ = [
     "Base",
@@ -38,6 +38,7 @@ __all__ = [
     "RunResult",
     "Share",
     "VncAddress",
+    "host_free_bytes",
     "host_info",
     "parse_share",
     "run_command",

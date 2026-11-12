@@ -16,7 +16,7 @@ from prove_engine.lock import HostLock
 from prove_engine.logic import parse_share
 from prove_engine.model import ProofError
 from prove_engine.pins import DEFAULT_COMMAND, RUN_PREFIX
-from prove_engine.process import host_info
+from prove_engine.process import host_free_bytes, host_info
 
 # The starter downloads its files into ~/.cache/workstation-bootstrap, so the engine keeps its
 # own data one level down, where a purge can never reach the starter's files.
@@ -106,7 +106,11 @@ def dispatch(args: argparse.Namespace, engine: Engine) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
     engine = Engine(
-        args.cache_root, host=host_info(), env=dict(os.environ), vm_lock=DEFAULT_VM_LOCK
+        args.cache_root,
+        host=host_info(),
+        env=dict(os.environ),
+        vm_lock=DEFAULT_VM_LOCK,
+        free_space=host_free_bytes,
     )
     try:
         if args.cache_root == DEFAULT_CACHE_ROOT:

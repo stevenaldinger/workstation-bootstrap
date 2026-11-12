@@ -9,7 +9,9 @@ the clone in a `finally` block, so a failed run never leaves a machine behind.
 Python API (`import prove_engine`; the test suite drives these):
 
     lock = Path("~/.cache/workstation-bootstrap/vm.lock").expanduser()  # one VM at a time
-    engine = Engine(cache_root, host=host_info(), env=dict(os.environ), vm_lock=lock)
+    engine = Engine(
+        cache_root, host=host_info(), env=dict(os.environ), vm_lock=lock, free_space=host_free_bytes
+    )
     engine.ensure_tart()                      # download, verify, unpack
     base = engine.base(target_major=26)       # pull and clone once
     with engine.machine("first-run", base) as vm:

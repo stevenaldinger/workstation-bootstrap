@@ -15,6 +15,7 @@ from prove_engine import (
     Engine,
     HostInfo,
 )
+from prove_engine.model import FreeSpace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APPLE_SILICON = HostInfo(15, "arm64", "Darwin")
@@ -85,12 +86,18 @@ def result_of(stdout: str, code: int = 0, stderr: str = "") -> CommandResult:
     return CommandResult(("x",), code, stdout, stderr)
 
 
-def make_engine(tmp_path: Path, runner: FakeRunner, spawner: FakeSpawner | None = None) -> Engine:
+def make_engine(
+    tmp_path: Path,
+    runner: FakeRunner,
+    spawner: FakeSpawner | None = None,
+    free_space: FreeSpace | None = None,
+) -> Engine:
     return Engine(
         tmp_path / "cache",
         host=APPLE_SILICON,
         env={"PATH": "/usr/bin"},
         vm_lock=tmp_path / "vm.lock",
+        free_space=free_space or (lambda _path: 500 * 1024**3),
         runner=runner,
         spawner=spawner or FakeSpawner(),
     )

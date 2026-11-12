@@ -76,12 +76,38 @@ def test_base_pulls_and_clones_once_then_reuses(
     assert not [c for c in runner.tart_calls() if c.startswith(("pull", "clone"))]
 
 
+def test_base_refuses_a_pull_without_room_for_the_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = FakeRunner(
+        [("--version", result_of(pins.TART_VERSION + "\n")), ("list", result_of(""))]
+    )
+    engine = make_engine(tmp_path, runner, free_space=lambda _path: 10 * 1024**3)
+    stage_unpacked_tart(engine, monkeypatch)
+    with pytest.raises(ProofError, match="free"):
+        engine.base(26)
+    assert not [c for c in runner.tart_calls() if c.startswith("pull")]
+
+
+def test_a_run_refuses_to_clone_without_room(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    engine = make_engine(tmp_path, runner, free_space=lambda _path: 1024**3)
+    with (
+        pytest.raises(ProofError, match="free"),
+        engine.machine("run", Base(select_image(26), "b")),
+    ):
+        pytest.fail("cloned without room")
+    assert runner.tart_calls() == []
+    assert not engine.vm_lock.exists()
+
+
 def test_base_refuses_a_host_that_is_not_apple_silicon(tmp_path: Path) -> None:
     engine = Engine(
         tmp_path,
         host=HostInfo(0, "x86_64", "Linux"),
         env={},
         vm_lock=tmp_path / "vm.lock",
+        free_space=lambda _path: 0,
         runner=FakeRunner(),
     )
     with pytest.raises(ProofError, match="Apple Silicon"):

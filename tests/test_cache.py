@@ -50,6 +50,7 @@ def test_purge_refuses_the_home_folder_and_deletes_nothing(tmp_path: Path) -> No
         host=make_engine(tmp_path, runner).host,
         env={"HOME": str(home)},
         vm_lock=tmp_path / "vm.lock",
+        free_space=lambda _path: 0,
         runner=runner,
     )
     with pytest.raises(ProofError, match="home folder"):
